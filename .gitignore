@@ -1,0 +1,16 @@
+.vs/
+bin/
+obj/
+
+*.user
+*.suo
+*.rsuser
+
+appsettings.json
+*.log
+/.gitignore
+/agent.md
+/CLAUDE.md
+/.gitignore
+/README.md
+/.gitignore
