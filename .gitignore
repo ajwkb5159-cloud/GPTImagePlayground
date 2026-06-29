@@ -1,0 +1,10 @@
+.vs/
+bin/
+obj/
+
+*.user
+*.suo
+*.rsuser
+
+appsettings.json
+*.log
