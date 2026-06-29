@@ -112,19 +112,20 @@ internal class ImageApiService
 
         // Parse images (b64_json first, then URL)
         var images = new List<(byte[] bytes, string mime)>();
+        var responseMime = GetOutputMime();
         foreach (var item in imageResponse.Data)
         {
             if (!string.IsNullOrWhiteSpace(item.B64Json))
             {
                 var bytes = Convert.FromBase64String(item.B64Json);
-                images.Add((bytes, "image/png"));
+                images.Add((bytes, responseMime));
             }
             else if (!string.IsNullOrWhiteSpace(item.Url))
             {
                 progress?.Report("正在下载图片...");
                 var bytes = await httpClient.GetByteArrayAsync(item.Url, cancellationToken)
                     .ConfigureAwait(false);
-                images.Add((bytes, "image/png"));
+                images.Add((bytes, responseMime));
             }
         }
 
@@ -143,10 +144,11 @@ internal class ImageApiService
                 ? _config.OutputDir
                 : Path.GetTempPath();
 
+            var extension = GetOutputExtension();
             var fileName = Path.Combine(outputDir,
                 images.Count == 1
-                    ? $"newapi_{timestamp}.png"
-                    : $"newapi_{timestamp}_{i + 1}.png");
+                    ? $"newapi_{timestamp}.{extension}"
+                    : $"newapi_{timestamp}_{i + 1}.{extension}");
 
             await File.WriteAllBytesAsync(fileName, images[i].bytes, cancellationToken)
                 .ConfigureAwait(false);
@@ -176,8 +178,12 @@ internal class ImageApiService
         {
             Model = _config.Model,
             Prompt = prompt,
-            N = 1,
+            N = Math.Max(1, _config.ImageCount),
+            Size = GetResolvedSize(),
+            OutputFormat = NormalizeOutputFormat(_config.OutputFormat),
             Stream = false,
+            Background = _config.TransparentBackground ? "transparent" : null,
+            Moderation = NormalizeModeration(_config.Moderation),
         };
 
         var json = JsonSerializer.Serialize(requestBody, JsonOptions);
@@ -199,8 +205,13 @@ internal class ImageApiService
 
         formData.Add(new StringContent(_config.Model), "model");
         formData.Add(new StringContent(prompt), "prompt");
-        formData.Add(new StringContent("1"), "n");
+        formData.Add(new StringContent(Math.Max(1, _config.ImageCount).ToString()), "n");
+        formData.Add(new StringContent(GetResolvedSize()), "size");
+        formData.Add(new StringContent(NormalizeOutputFormat(_config.OutputFormat)), "output_format");
+        formData.Add(new StringContent(NormalizeModeration(_config.Moderation)), "moderation");
         formData.Add(new StringContent("false"), "stream");
+        if (_config.TransparentBackground)
+            formData.Add(new StringContent("transparent"), "background");
 
         var imageNames = new List<string>();
         foreach (var imagePath in imagePaths)
@@ -236,6 +247,39 @@ internal class ImageApiService
             _ => "image/png",
         };
     }
+
+    private string GetResolvedSize() => ImageSizeResolver.Resolve(
+        _config.SizeMode,
+        _config.SizeTier,
+        _config.AspectRatio,
+        _config.CustomWidth,
+        _config.CustomHeight);
+
+    private static string NormalizeOutputFormat(string? format)
+    {
+        var value = (format ?? "png").Trim().ToLowerInvariant();
+        return value is "png" or "jpeg" or "webp" ? value : "png";
+    }
+
+    private static string NormalizeModeration(string? moderation)
+    {
+        var value = (moderation ?? "auto").Trim().ToLowerInvariant();
+        return value is "auto" or "low" ? value : "auto";
+    }
+
+    private string GetOutputMime() => NormalizeOutputFormat(_config.OutputFormat) switch
+    {
+        "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        _ => "image/png",
+    };
+
+    private string GetOutputExtension() => NormalizeOutputFormat(_config.OutputFormat) switch
+    {
+        "jpeg" => "jpg",
+        "webp" => "webp",
+        _ => "png",
+    };
 }
 
 internal class GenerateResult

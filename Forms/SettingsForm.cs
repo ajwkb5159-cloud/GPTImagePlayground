@@ -1,39 +1,61 @@
 using ImageGenerator.Models;
-using ImageGenerator.Services;
 
 namespace ImageGenerator.Forms;
 
 internal partial class SettingsForm : Form
 {
-    private readonly AppConfig _config;
-
     public AppConfig Result { get; private set; }
 
     public SettingsForm(AppConfig currentConfig)
     {
         InitializeComponent();
 
-        _config = currentConfig;
         Result = currentConfig;
 
-        // ── Load current config values ──
         _baseUrlBox.Text = currentConfig.BaseUrl;
         _apiKeyBox.Text = currentConfig.ApiKey;
         _modelBox.Text = currentConfig.Model;
         _outputDirBox.Text = currentConfig.OutputDir;
-        _timeoutNumeric.Value = currentConfig.TimeoutMinutes;
+        _timeoutNumeric.Value = Clamp(currentConfig.TimeoutMinutes, _timeoutNumeric.Minimum, _timeoutNumeric.Maximum);
 
-        // ── Event wiring ──
+        SelectComboValue(_sizeTierBox, currentConfig.SizeTier, "1K");
+        SelectComboValue(_aspectRatioBox, currentConfig.AspectRatio, "1:1");
+        _customWidthNumeric.Value = Clamp(currentConfig.CustomWidth, _customWidthNumeric.Minimum, _customWidthNumeric.Maximum);
+        _customHeightNumeric.Value = Clamp(currentConfig.CustomHeight, _customHeightNumeric.Minimum, _customHeightNumeric.Maximum);
+        _sizeAutoRadio.Checked = string.Equals(currentConfig.SizeMode, "auto", StringComparison.OrdinalIgnoreCase);
+        _sizePresetRadio.Checked = string.Equals(currentConfig.SizeMode, "preset", StringComparison.OrdinalIgnoreCase);
+        _sizeCustomRadio.Checked = !_sizeAutoRadio.Checked && !_sizePresetRadio.Checked;
+
+        SelectComboValue(_outputFormatBox, currentConfig.OutputFormat, "png");
+        _transparentBackgroundCheck.Checked = currentConfig.TransparentBackground;
+        UpdateTransparentLabel();
+        SelectComboValue(_moderationBox, currentConfig.Moderation, "auto");
+        _imageCountNumeric.Value = Clamp(currentConfig.ImageCount, _imageCountNumeric.Minimum, _imageCountNumeric.Maximum);
+
         showKeyBtn.Click += ShowKeyBtn_Click;
         browseBtn.Click += BrowseBtn_Click;
         saveBtn.Click += SaveBtn_Click;
         cancelBtn.Click += CancelBtn_Click;
+        _sizeAutoRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
+        _sizePresetRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
+        _sizeCustomRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
+        _transparentBackgroundCheck.CheckedChanged += (_, _) => UpdateTransparentLabel();
+
         ConfigureRoundedButtons();
+        UpdateSizeControlStates();
     }
 
-    // ═══════════════════════════════════════════════════
-    //  Event Handlers
-    // ═══════════════════════════════════════════════════
+    private static decimal Clamp(int value, decimal min, decimal max) =>
+        Math.Min(max, Math.Max(min, value));
+
+    private static void SelectComboValue(ComboBox comboBox, string? value, string fallback)
+    {
+        var selected = string.IsNullOrWhiteSpace(value) ? fallback : value;
+        var index = comboBox.Items.IndexOf(selected);
+        comboBox.SelectedIndex = index >= 0 ? index : comboBox.Items.IndexOf(fallback);
+        if (comboBox.SelectedIndex < 0 && comboBox.Items.Count > 0)
+            comboBox.SelectedIndex = 0;
+    }
 
     private void ConfigureRoundedButtons()
     {
@@ -70,6 +92,21 @@ internal partial class SettingsForm : Form
         oldRegion?.Dispose();
     }
 
+    private void UpdateSizeControlStates()
+    {
+        var presetEnabled = _sizePresetRadio.Checked;
+        var customEnabled = _sizeCustomRadio.Checked;
+        _sizeTierBox.Enabled = presetEnabled;
+        _aspectRatioBox.Enabled = presetEnabled;
+        _customWidthNumeric.Enabled = customEnabled;
+        _customHeightNumeric.Enabled = customEnabled;
+    }
+
+    private void UpdateTransparentLabel()
+    {
+        _transparentBackgroundCheck.Text = _transparentBackgroundCheck.Checked ? "true" : "false";
+    }
+
     private void ShowKeyBtn_Click(object? sender, EventArgs e)
     {
         _apiKeyBox.UseSystemPasswordChar = !_apiKeyBox.UseSystemPasswordChar;
@@ -103,6 +140,15 @@ internal partial class SettingsForm : Form
             Model = _modelBox.Text.Trim(),
             OutputDir = _outputDirBox.Text.Trim(),
             TimeoutMinutes = (int)_timeoutNumeric.Value,
+            SizeMode = GetSelectedSizeMode(),
+            SizeTier = _sizeTierBox.SelectedItem?.ToString() ?? "1K",
+            AspectRatio = _aspectRatioBox.SelectedItem?.ToString() ?? "1:1",
+            CustomWidth = (int)_customWidthNumeric.Value,
+            CustomHeight = (int)_customHeightNumeric.Value,
+            OutputFormat = _outputFormatBox.SelectedItem?.ToString() ?? "png",
+            TransparentBackground = _transparentBackgroundCheck.Checked,
+            Moderation = _moderationBox.SelectedItem?.ToString() ?? "auto",
+            ImageCount = (int)_imageCountNumeric.Value,
         };
 
         if (string.IsNullOrWhiteSpace(Result.BaseUrl))
@@ -123,5 +169,12 @@ internal partial class SettingsForm : Form
 
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private string GetSelectedSizeMode()
+    {
+        if (_sizePresetRadio.Checked) return "preset";
+        if (_sizeCustomRadio.Checked) return "custom";
+        return "auto";
     }
 }

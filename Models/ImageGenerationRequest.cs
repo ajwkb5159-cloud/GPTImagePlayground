@@ -22,6 +22,9 @@ internal class ImageGenerationRequest
     [JsonPropertyName("style")]
     public string? Style { get; set; }
 
+    [JsonPropertyName("output_format")]
+    public string? OutputFormat { get; set; }
+
     // gwlink/NewAPI rejects string values for this field; send JSON boolean false.
     [JsonPropertyName("stream")]
     public bool? Stream { get; set; }

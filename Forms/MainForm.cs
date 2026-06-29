@@ -136,9 +136,8 @@ internal partial class MainForm : Form
 
         _isGenerating = true;
 
-        // Clear input (before async work, so the user can type again immediately)
-        _promptBox.Text = "";
         var attachedCopy = new List<string>(_attachedImages);
+        _promptBox.Clear();
         _attachedImages.Clear();
         _thumbnailStrip.Controls.Clear();
         _thumbnailStrip.Visible = false;
@@ -513,6 +512,7 @@ internal partial class MainForm : Form
             ForeColor = Color.FromArgb(30, 41, 59),
             Font = new Font("Microsoft YaHei UI", 10F),
         };
+        label.ContextMenuStrip = CreatePromptContextMenu(msg.Prompt);
         panel.Controls.Add(label);
 
         // Attached image thumbnails
@@ -535,6 +535,33 @@ internal partial class MainForm : Form
         }
 
         return panel;
+    }
+
+    private ContextMenuStrip CreatePromptContextMenu(string prompt)
+    {
+        var menu = new ContextMenuStrip();
+        var hasPrompt = !string.IsNullOrWhiteSpace(prompt);
+        var copyItem = menu.Items.Add("复制提示词");
+        copyItem.Enabled = hasPrompt;
+        copyItem.Click += (_, _) =>
+        {
+            if (hasPrompt)
+                Clipboard.SetText(prompt);
+        };
+
+        var refillItem = menu.Items.Add("填回输入框");
+        refillItem.Enabled = hasPrompt;
+        refillItem.Click += (_, _) => FillPromptFromMessage(prompt);
+        return menu;
+    }
+
+    private void FillPromptFromMessage(string prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt)) return;
+
+        _promptBox.Text = prompt;
+        _promptBox.SelectionStart = _promptBox.TextLength;
+        _promptBox.Focus();
     }
 
     private Panel CreateAssistantBubble(ChatMessage msg, int maxWidth)
