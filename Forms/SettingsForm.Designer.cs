@@ -46,16 +46,24 @@ partial class SettingsForm
         if (!File.Exists(iconPath))
             return new Bitmap(24, 24);
 
-        using var stream = File.OpenRead(iconPath);
-        using var image = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: true);
-        return new Bitmap(image);
+        try
+        {
+            using var stream = File.OpenRead(iconPath);
+            using var image = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: true);
+            return new Bitmap(image);
+        }
+        catch
+        {
+            return new Bitmap(24, 24);
+        }
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && components != null)
+        if (disposing)
         {
-            components.Dispose();
+            DisposeCachedResources();
+            components?.Dispose();
         }
         base.Dispose(disposing);
     }

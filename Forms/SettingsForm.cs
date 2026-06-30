@@ -14,6 +14,7 @@ internal partial class SettingsForm : Form
     private bool _isApplyingResponsiveLayout;
     private bool _wasMinimized;
     private bool _restoreLayoutQueued;
+    private readonly Dictionary<(int SizeHundredths, FontStyle Style), Font> _fontCache = [];
 
     public AppConfig Result { get; private set; }
 
@@ -198,8 +199,26 @@ internal partial class SettingsForm : Form
     private int ScaleValue(int value) =>
         Math.Max(1, (int)Math.Round(value * _uiScale * DpiScale));
 
-    private Font UiFont(float size, FontStyle style = FontStyle.Regular) =>
-        new("Microsoft YaHei UI", Math.Max(7.5F, size * _uiScale), style);
+    private Font UiFont(float size, FontStyle style = FontStyle.Regular)
+    {
+        var fontSize = Math.Max(7.5F, size * _uiScale);
+        var sizeKey = (int)Math.Round(fontSize * 100F);
+        var key = (sizeKey, style);
+        if (_fontCache.TryGetValue(key, out var font))
+            return font;
+
+        font = new Font("Microsoft YaHei UI", sizeKey / 100F, style);
+        _fontCache[key] = font;
+        return font;
+    }
+
+    private void DisposeCachedResources()
+    {
+        foreach (var font in _fontCache.Values)
+            font.Dispose();
+
+        _fontCache.Clear();
+    }
 
     private void SetColumnWidth(TableLayoutPanel table, int columnIndex, int width)
     {
