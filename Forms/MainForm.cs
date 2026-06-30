@@ -472,7 +472,16 @@ internal partial class MainForm : Form
                 if (_chatPanel.Parent is ScrollableControl parent)
                 {
                     ResizeChatPanelHeight();
-                    parent.AutoScrollPosition = new Point(0, parent.DisplayRectangle.Height);
+                    var viewportHeight = Math.Max(0, parent.ClientSize.Height - parent.Padding.Vertical);
+                    if (GetChatContentHeight() <= viewportHeight)
+                    {
+                        parent.AutoScrollPosition = Point.Empty;
+                        _chatPanel.Location = new Point(parent.Padding.Left, parent.Padding.Top);
+                        return;
+                    }
+
+                    var scrollY = Math.Max(0, parent.Padding.Top + _chatPanel.Height + parent.Padding.Bottom - parent.ClientSize.Height);
+                    parent.AutoScrollPosition = new Point(0, scrollY);
                 }
             });
         }
@@ -705,14 +714,22 @@ internal partial class MainForm : Form
         if (_chatPanel.IsDisposed) return;
 
         _chatPanel.PerformLayout();
+        var contentHeight = GetChatContentHeight();
+        var viewportHeight = Math.Max(0, chatContainer.ClientSize.Height - chatContainer.Padding.Vertical);
+        _chatPanel.Height = contentHeight <= viewportHeight
+            ? contentHeight
+            : contentHeight + ScaleValue(8);
+    }
+
+    private int GetChatContentHeight()
+    {
         var contentHeight = 0;
         foreach (Control control in _chatPanel.Controls)
         {
             contentHeight = Math.Max(contentHeight, control.Bottom + control.Margin.Bottom);
         }
 
-        var minHeight = Math.Max(0, chatContainer.ClientSize.Height - chatContainer.Padding.Vertical);
-        _chatPanel.Height = Math.Max(minHeight, contentHeight + 8);
+        return contentHeight;
     }
 
     private Panel CreateUserBubble(ChatMessage msg, int maxWidth)
