@@ -961,13 +961,16 @@ internal partial class MainForm : Form
 
     private Panel CreatePendingBubble(string text, int maxWidth, bool isError)
     {
+        var padding = new Padding(ScaleValue(14), ScaleValue(8), ScaleValue(12), ScaleValue(8));
+        var contentMaxWidth = Math.Max(ScaleValue(120), maxWidth - padding.Horizontal);
         var label = new Label
         {
             Text = isError ? text : $"⏳ {text}",
             AutoSize = true,
-            MaximumSize = new Size(maxWidth - ScaleValue(30), 0),
+            MaximumSize = new Size(contentMaxWidth, 0),
             ForeColor = isError ? Color.FromArgb(185, 28, 28) : Color.FromArgb(71, 85, 105),
             Font = UiFont(9F),
+            Location = new Point(padding.Left, padding.Top),
             Padding = new Padding(0),
         };
 
@@ -977,7 +980,7 @@ internal partial class MainForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             MaximumSize = new Size(maxWidth, 0),
             BackColor = isError ? Color.FromArgb(254, 242, 242) : Color.White,
-            Padding = new Padding(ScaleValue(12)),
+            Padding = padding,
             Margin = new Padding(0),
         };
 
@@ -994,6 +997,7 @@ internal partial class MainForm : Form
         };
 
         panel.Controls.Add(label);
+        panel.MinimumSize = new Size(0, label.Bottom + padding.Bottom);
         return panel;
     }
 
