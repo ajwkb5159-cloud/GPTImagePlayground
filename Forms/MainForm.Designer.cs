@@ -18,7 +18,7 @@ partial class MainForm
 
     // ── Chat area ──
     private Panel chatContainer;
-    private FlowLayoutPanel _chatPanel;
+    private Panel _chatPanel;
 
     // ── Loading overlay ──
     private Panel _loadingOverlay;
@@ -40,16 +40,24 @@ partial class MainForm
         if (!File.Exists(iconPath))
             return new Bitmap(24, 24);
 
-        using var stream = File.OpenRead(iconPath);
-        using var image = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: true);
-        return new Bitmap(image);
+        try
+        {
+            using var stream = File.OpenRead(iconPath);
+            using var image = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: true);
+            return new Bitmap(image);
+        }
+        catch
+        {
+            return new Bitmap(24, 24);
+        }
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && components != null)
+        if (disposing)
         {
-            components.Dispose();
+            DisposeCachedResources();
+            components?.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -64,7 +72,7 @@ partial class MainForm
         this.settingsBtn = new Button();
         this.separator = new Panel();
         this.chatContainer = new Panel();
-        this._chatPanel = new FlowLayoutPanel();
+        this._chatPanel = new Panel();
         this._loadingOverlay = new Panel();
         this._loadingLabel = new Label();
         this.inputPanel = new Panel();
@@ -160,12 +168,8 @@ partial class MainForm
         this.chatContainer.Padding = new Padding(12);
 
         //  _chatPanel
-        this._chatPanel.FlowDirection = FlowDirection.TopDown;
-        this._chatPanel.AutoSize = true;
-        this._chatPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         this._chatPanel.Width = this.chatContainer.Width - 24;
         this._chatPanel.Padding = new Padding(0);
-        this._chatPanel.WrapContents = false;
 
         this.chatContainer.Controls.Add(this._chatPanel);
 
@@ -182,6 +186,7 @@ partial class MainForm
         this._loadingLabel.ForeColor = Color.FromArgb(59, 130, 246);
         this._loadingLabel.AutoSize = true;
         this._loadingLabel.TextAlign = ContentAlignment.MiddleCenter;
+        this._loadingOverlay.Controls.Add(this._loadingLabel);
 
         // ═══════════════════════════════════════════════════
         //  inputPanel

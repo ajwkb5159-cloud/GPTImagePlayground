@@ -32,6 +32,11 @@ internal partial class MainForm : Form
     private bool _isApplyingResponsiveLayout;
     private bool _wasMinimized;
     private bool _restoreLayoutQueued;
+    private bool _isClosing;
+    private int _lastChatScrollY;
+    private bool _lastChatWasAtBottom = true;
+    private CancellationTokenSource? _generationCts;
+    private readonly Dictionary<(int SizeHundredths, FontStyle Style), Font> _fontCache = [];
 
     public MainForm()
     {
@@ -41,7 +46,6 @@ internal partial class MainForm : Form
         _config = _configManager.Load();
         _apiService = new ImageApiService(_config);
 
-        _chatPanel.AutoSize = false;
         _chatPanel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
         // ── Event wiring ──
@@ -54,12 +58,13 @@ internal partial class MainForm : Form
 
         chatContainer.SizeChanged += (_, _) =>
         {
-            if (WindowState == FormWindowState.Minimized)
+            if (WindowState == FormWindowState.Minimized || _isApplyingResponsiveLayout)
                 return;
 
             UpdateChatPanelBounds();
             ReflowChatRows();
         };
+        chatContainer.Scroll += (_, _) => RememberChatScrollState();
 
         _loadingOverlay.SizeChanged += (_, _) => CenterLoadingLabel();
 
@@ -115,20 +120,29 @@ internal partial class MainForm : Form
             return;
         }
 
+        var restoringFromMinimized = _wasMinimized;
+        var restoreScrollY = _lastChatScrollY;
+        var restoreToBottom = _lastChatWasAtBottom;
+
+        if (!restoringFromMinimized)
+            RememberChatScrollState();
+
         ApplyResponsiveLayout();
 
-        if (_wasMinimized)
+        if (restoringFromMinimized)
         {
             _wasMinimized = false;
-            QueueRestoreLayoutRefresh();
+            QueueRestoreLayoutRefresh(restoreToBottom, restoreScrollY);
         }
     }
 
-    private void QueueRestoreLayoutRefresh()
+    private void QueueRestoreLayoutRefresh(bool? restoreToBottom = null, int? restoreScrollY = null)
     {
         if (_restoreLayoutQueued || !IsHandleCreated || IsDisposed)
             return;
 
+        var targetScrollY = restoreScrollY ?? _lastChatScrollY;
+        var targetToBottom = restoreToBottom ?? _lastChatWasAtBottom;
         _restoreLayoutQueued = true;
         BeginInvoke(() =>
         {
@@ -138,6 +152,7 @@ internal partial class MainForm : Form
 
             ApplyResponsiveLayout();
             ForceTextLayoutRefresh(this);
+            FinalizeRestoreChatScroll(targetToBottom, targetScrollY);
             Invalidate(true);
         });
     }
@@ -163,6 +178,7 @@ internal partial class MainForm : Form
             inputPanel.SuspendLayout();
             inputCard.SuspendLayout();
             actionBar.SuspendLayout();
+            chatContainer.SuspendLayout();
 
             topBar.Height = ScaleValue(compact ? 42 : 48);
             topBar.Padding = new Padding(ScaleValue(compact ? 10 : 16), 0, ScaleValue(8), 0);
@@ -221,6 +237,7 @@ internal partial class MainForm : Form
         }
         finally
         {
+            chatContainer.ResumeLayout(false);
             actionBar.ResumeLayout(true);
             inputCard.ResumeLayout(true);
             inputPanel.ResumeLayout(true);
@@ -246,8 +263,26 @@ internal partial class MainForm : Form
     private int ScaleValue(int value) =>
         Math.Max(1, (int)Math.Round(value * _uiScale * DpiScale));
 
-    private Font UiFont(float size, FontStyle style = FontStyle.Regular) =>
-        new("Microsoft YaHei UI", Math.Max(7.5F, size * _uiScale), style);
+    private Font UiFont(float size, FontStyle style = FontStyle.Regular)
+    {
+        var fontSize = Math.Max(7.5F, size * _uiScale);
+        var sizeKey = (int)Math.Round(fontSize * 100F);
+        var key = (sizeKey, style);
+        if (_fontCache.TryGetValue(key, out var font))
+            return font;
+
+        font = new Font("Microsoft YaHei UI", sizeKey / 100F, style);
+        _fontCache[key] = font;
+        return font;
+    }
+
+    private void DisposeCachedResources()
+    {
+        foreach (var font in _fontCache.Values)
+            font.Dispose();
+
+        _fontCache.Clear();
+    }
 
     private static int Clamp(int value, int min, int max) =>
         Math.Min(max, Math.Max(min, value));
@@ -304,7 +339,7 @@ internal partial class MainForm : Form
             _config = dlg.Result;
             _apiService = new ImageApiService(_config);
             _configManager.Save(_config);
-            AddSystemMessage("✅ 设置已保存。");
+            _promptBox.Focus();
         }
     }
 
@@ -375,9 +410,12 @@ internal partial class MainForm : Form
 
             var progress = new Progress<string>(msg =>
             {
-                if (!IsDisposed)
+                if (!IsDisposed && !_isClosing)
                     BeginInvoke(() =>
                     {
+                        if (IsDisposed || _isClosing)
+                            return;
+
                         ShowLoading(true, msg);
                         UpdatePendingResponseBubble(msg);
                     });
@@ -385,9 +423,13 @@ internal partial class MainForm : Form
 
             using var cts = new CancellationTokenSource(
                 TimeSpan.FromMinutes(_config.TimeoutMinutes + 1));
+            _generationCts = cts;
 
             var result = await Task.Run(() =>
                 _apiService.GenerateAsync(prompt, attachedCopy, progress, cts.Token));
+
+            if (_isClosing || IsDisposed)
+                return;
 
             // Create assistant message for each generated image
             for (int i = 0; i < result.SavedPaths.Count; i++)
@@ -409,10 +451,16 @@ internal partial class MainForm : Form
         }
         catch (Exception ex)
         {
+            if (_isClosing || IsDisposed)
+                return;
+
             var errorMsg = ex switch
             {
                 TaskCanceledException => "请求超时，请检查超时设置或降低图片尺寸后重试。",
                 HttpRequestException httpEx => $"API 请求失败: {httpEx.Message}",
+                DirectoryNotFoundException dirEx => $"输出目录不存在或无法访问: {dirEx.Message}",
+                UnauthorizedAccessException accessEx => $"没有文件访问权限，请检查输出目录或图片文件权限: {accessEx.Message}",
+                IOException ioEx => $"文件读写失败，请检查磁盘空间、输出目录或图片文件是否可用: {ioEx.Message}",
                 InvalidOperationException opEx => opEx.Message,
                 _ => $"未知错误: {ex.Message}",
             };
@@ -420,9 +468,14 @@ internal partial class MainForm : Form
         }
         finally
         {
-            ShowLoading(false);
+            _generationCts = null;
+
+            if (!_isClosing && !IsDisposed)
+                ShowLoading(false);
+
             _isGenerating = false;
-            _promptBox.Focus();
+            if (!_isClosing && !IsDisposed)
+                _promptBox.Focus();
         }
     }
 
@@ -436,7 +489,8 @@ internal partial class MainForm : Form
         {
             _loadingLabel.Text = text ?? "🔄 正在生成图片...";
             CenterLoadingLabel();
-            _loadingOverlay.Visible = false;
+            _loadingOverlay.Visible = true;
+            _loadingOverlay.BringToFront();
             _sendBtn.Enabled = false;
             _attachBtn.Enabled = false;
         }
@@ -458,6 +512,7 @@ internal partial class MainForm : Form
     {
         var bubble = CreateBubble(msg);
         _chatPanel.Controls.Add(bubble);
+        StackChatRows();
         ResizeChatPanelHeight();
 
         ScrollChatToBottom();
@@ -471,17 +526,22 @@ internal partial class MainForm : Form
             {
                 if (_chatPanel.Parent is ScrollableControl parent)
                 {
+                    StackChatRows();
                     ResizeChatPanelHeight();
                     var viewportHeight = Math.Max(0, parent.ClientSize.Height - parent.Padding.Vertical);
                     if (GetChatContentHeight() <= viewportHeight)
                     {
                         parent.AutoScrollPosition = Point.Empty;
                         _chatPanel.Location = new Point(parent.Padding.Left, parent.Padding.Top);
+                        _lastChatScrollY = 0;
+                        _lastChatWasAtBottom = true;
                         return;
                     }
 
                     var scrollY = Math.Max(0, parent.Padding.Top + _chatPanel.Height + parent.Padding.Bottom - parent.ClientSize.Height);
                     parent.AutoScrollPosition = new Point(0, scrollY);
+                    _lastChatScrollY = scrollY;
+                    _lastChatWasAtBottom = true;
                 }
             });
         }
@@ -497,6 +557,7 @@ internal partial class MainForm : Form
         var rowWidth = GetChatRowWidth();
         var bubble = CreateWelcomeBubble(GetSystemBubbleMaxWidth(rowWidth));
         _chatPanel.Controls.Add(CreateBubbleRow(bubble, ChatRole.System, rowWidth));
+        StackChatRows();
         ResizeChatPanelHeight();
         ScrollChatToBottom();
     }
@@ -667,16 +728,84 @@ internal partial class MainForm : Form
 
     private void ReflowChatRows()
     {
+        var scrollY = GetChatScrollY();
+        var wasAtBottom = IsChatScrolledToBottom();
+
+        StackChatRows();
+        ResizeChatPanelHeight();
+        RestoreChatScroll(wasAtBottom ? GetChatMaxScrollY() : scrollY);
+        RememberChatScrollState();
+    }
+
+    private void StackChatRows()
+    {
+        if (_chatPanel.IsDisposed)
+            return;
+
+        var y = 0;
         var rowWidth = GetChatRowWidth();
         foreach (Control control in _chatPanel.Controls)
         {
-            if (control.Tag as string == "chat-row")
-            {
-                control.Width = rowWidth;
-                control.PerformLayout();
-            }
+            if (control.Tag as string != "chat-row")
+                continue;
+
+            y += control.Margin.Top;
+            control.Location = new Point(control.Margin.Left, y);
+            control.Width = Math.Max(0, rowWidth - control.Margin.Horizontal);
+            control.PerformLayout();
+            y = control.Bottom + control.Margin.Bottom;
         }
+    }
+
+    private int GetChatScrollY() =>
+        Math.Max(0, -chatContainer.AutoScrollPosition.Y);
+
+    private int GetChatMaxScrollY() =>
+        Math.Max(0, chatContainer.Padding.Top + _chatPanel.Height + chatContainer.Padding.Bottom - chatContainer.ClientSize.Height);
+
+    private bool IsChatScrolledToBottom()
+    {
+        var maxScrollY = GetChatMaxScrollY();
+        return maxScrollY == 0 || GetChatScrollY() >= maxScrollY - ScaleValue(4);
+    }
+
+    private void RestoreChatScroll(int scrollY)
+    {
+        if (chatContainer.IsDisposed)
+            return;
+
+        var maxScrollY = GetChatMaxScrollY();
+        if (maxScrollY <= 0)
+        {
+            chatContainer.AutoScrollPosition = Point.Empty;
+            _chatPanel.Location = new Point(chatContainer.Padding.Left, chatContainer.Padding.Top);
+            _lastChatScrollY = 0;
+            _lastChatWasAtBottom = true;
+            return;
+        }
+
+        var clampedScrollY = Math.Min(scrollY, maxScrollY);
+        chatContainer.AutoScrollPosition = new Point(0, clampedScrollY);
+        _lastChatScrollY = clampedScrollY;
+        _lastChatWasAtBottom = clampedScrollY >= maxScrollY - ScaleValue(4);
+    }
+
+    private void RememberChatScrollState()
+    {
+        if (chatContainer.IsDisposed || _chatPanel.IsDisposed)
+            return;
+
+        _lastChatScrollY = GetChatScrollY();
+        _lastChatWasAtBottom = IsChatScrolledToBottom();
+    }
+
+    private void FinalizeRestoreChatScroll(bool restoreToBottom, int restoreScrollY)
+    {
+        UpdateChatPanelBounds();
+        StackChatRows();
         ResizeChatPanelHeight();
+        RestoreChatScroll(restoreToBottom ? GetChatMaxScrollY() : restoreScrollY);
+        RememberChatScrollState();
     }
 
     private int GetChatRowWidth()
@@ -693,6 +822,7 @@ internal partial class MainForm : Form
         _chatPanel.Location = new Point(chatContainer.Padding.Left, chatContainer.Padding.Top);
         _chatPanel.Width = width;
         _chatPanel.MaximumSize = new Size(width, 0);
+        StackChatRows();
         ResizeChatPanelHeight();
     }
 
@@ -713,12 +843,9 @@ internal partial class MainForm : Form
     {
         if (_chatPanel.IsDisposed) return;
 
-        _chatPanel.PerformLayout();
         var contentHeight = GetChatContentHeight();
         var viewportHeight = Math.Max(0, chatContainer.ClientSize.Height - chatContainer.Padding.Vertical);
-        _chatPanel.Height = contentHeight <= viewportHeight
-            ? contentHeight
-            : contentHeight + ScaleValue(8);
+        _chatPanel.Height = Math.Max(contentHeight, viewportHeight);
     }
 
     private int GetChatContentHeight()
@@ -856,11 +983,9 @@ internal partial class MainForm : Form
                     Size = new Size(previewWidth, previewHeight),
                     Location = new Point(padding, y),
                 };
-                pictureBox.Click += (_, _) =>
+                pictureBox.DoubleClick += (_, _) =>
                 {
-                    // Open in default viewer on double click
-                    try { System.Diagnostics.Process.Start("explorer.exe", msg.GeneratedImagePath!); }
-                    catch { }
+                    OpenGeneratedImage(msg.GeneratedImagePath);
                 };
                 pictureBox.Cursor = Cursors.Hand;
                 panel.Controls.Add(pictureBox);
@@ -925,6 +1050,24 @@ internal partial class MainForm : Form
         return LoadImageFromBytes(File.ReadAllBytes(msg.GeneratedImagePath));
     }
 
+    private static void OpenGeneratedImage(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+            return;
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(imagePath)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch
+        {
+            // The saved path remains visible if the OS cannot launch an image viewer.
+        }
+    }
+
     private static Image LoadImageFromBytes(byte[] bytes)
     {
         using var ms = new MemoryStream(bytes);
@@ -972,6 +1115,7 @@ internal partial class MainForm : Form
         _pendingResponseLabel = _pendingResponseBubble.Controls.OfType<Label>().FirstOrDefault();
         _pendingResponseRow = CreateBubbleRow(_pendingResponseBubble, ChatRole.Assistant, rowWidth);
         _chatPanel.Controls.Add(_pendingResponseRow);
+        StackChatRows();
         ResizeChatPanelHeight();
         ScrollChatToBottom();
     }
@@ -980,16 +1124,8 @@ internal partial class MainForm : Form
     {
         var padding = new Padding(ScaleValue(14), ScaleValue(8), ScaleValue(12), ScaleValue(8));
         var contentMaxWidth = Math.Max(ScaleValue(120), maxWidth - padding.Horizontal);
-        var label = new Label
-        {
-            Text = isError ? text : $"⏳ {text}",
-            AutoSize = true,
-            MaximumSize = new Size(contentMaxWidth, 0),
-            ForeColor = isError ? Color.FromArgb(185, 28, 28) : Color.FromArgb(71, 85, 105),
-            Font = UiFont(9F),
-            Location = new Point(padding.Left, padding.Top),
-            Padding = new Padding(0),
-        };
+        var textControl = CreatePendingTextControl(text, isError, contentMaxWidth, UiFont(9F));
+        textControl.Location = new Point(padding.Left, padding.Top);
 
         var panel = new Panel
         {
@@ -1013,9 +1149,50 @@ internal partial class MainForm : Form
                 Color.FromArgb(226, 232, 240), 1, ButtonBorderStyle.Solid);
         };
 
-        panel.Controls.Add(label);
-        panel.MinimumSize = new Size(0, label.Bottom + padding.Bottom);
+        panel.Controls.Add(textControl);
+        panel.MinimumSize = new Size(0, textControl.Bottom + padding.Bottom);
         return panel;
+    }
+
+    private Control CreatePendingTextControl(string text, bool isError, int contentMaxWidth, Font font)
+    {
+        if (!isError)
+        {
+            return new Label
+            {
+                Text = $"⏳ {text}",
+                AutoSize = true,
+                MaximumSize = new Size(contentMaxWidth, 0),
+                ForeColor = Color.FromArgb(71, 85, 105),
+                Font = font,
+                Padding = new Padding(0),
+            };
+        }
+
+        var measured = TextRenderer.MeasureText(
+            text,
+            font,
+            new Size(contentMaxWidth, int.MaxValue),
+            TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl);
+        var maxErrorHeight = Clamp(
+            (int)Math.Round(chatContainer.ClientSize.Height * 0.45F),
+            ScaleValue(120),
+            ScaleValue(260));
+
+        return new TextBox
+        {
+            Text = text,
+            Multiline = true,
+            ReadOnly = true,
+            BorderStyle = BorderStyle.None,
+            ScrollBars = measured.Height > maxErrorHeight ? ScrollBars.Vertical : ScrollBars.None,
+            Width = contentMaxWidth,
+            Height = Math.Min(measured.Height + ScaleValue(8), maxErrorHeight),
+            ForeColor = Color.FromArgb(185, 28, 28),
+            BackColor = Color.FromArgb(254, 242, 242),
+            Font = font,
+            TabStop = false,
+        };
     }
 
     private void UpdatePendingResponseBubble(string text)
@@ -1024,6 +1201,7 @@ internal partial class MainForm : Form
 
         _pendingResponseLabel.Text = $"⏳ {text}";
         _pendingResponseRow.PerformLayout();
+        StackChatRows();
         ResizeChatPanelHeight();
         ScrollChatToBottom();
     }
@@ -1042,8 +1220,12 @@ internal partial class MainForm : Form
         _pendingResponseBubble = CreatePendingBubble(text, bubbleWidth, true);
         _pendingResponseLabel = _pendingResponseBubble.Controls.OfType<Label>().FirstOrDefault();
         _pendingResponseRow.Controls.Add(_pendingResponseBubble);
-        _pendingResponseRow.PerformLayout();
+        LayoutBubbleRow(_pendingResponseRow, _pendingResponseBubble, ChatRole.Assistant);
+        StackChatRows();
         ResizeChatPanelHeight();
+        _pendingResponseRow = null;
+        _pendingResponseBubble = null;
+        _pendingResponseLabel = null;
         ScrollChatToBottom();
     }
 
@@ -1063,6 +1245,7 @@ internal partial class MainForm : Form
         _pendingResponseBubble = null;
         _pendingResponseLabel = null;
         LayoutBubbleRow(_pendingResponseRow, bubble, ChatRole.Assistant);
+        StackChatRows();
         ResizeChatPanelHeight();
         _pendingResponseRow = null;
         ScrollChatToBottom();
@@ -1074,6 +1257,7 @@ internal partial class MainForm : Form
         {
             _chatPanel.Controls.Remove(_pendingResponseRow);
             _pendingResponseRow.Dispose();
+            StackChatRows();
             ResizeChatPanelHeight();
         }
 
@@ -1094,6 +1278,9 @@ internal partial class MainForm : Form
         {
             _attachedImages.Remove(imagePath);
             _thumbnailStrip.Controls.Remove(thumb);
+            var image = thumb.Image;
+            thumb.Image = null;
+            image?.Dispose();
             thumb.Dispose();
             _thumbnailStrip.Visible = _thumbnailStrip.Controls.Count > 0;
         };
@@ -1124,6 +1311,25 @@ internal partial class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
+        if (_isGenerating && e.CloseReason == CloseReason.UserClosing)
+        {
+            var result = MessageBox.Show(
+                this,
+                "当前还有图片生成请求正在进行，确定要关闭吗？",
+                "确认关闭",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+
+            if (result != DialogResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+        }
+
+        _isClosing = true;
+        _generationCts?.Cancel();
         _configManager.Save(_config);
         base.OnFormClosing(e);
     }
