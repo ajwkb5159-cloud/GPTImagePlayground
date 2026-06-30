@@ -4,6 +4,17 @@ namespace ImageGenerator.Forms;
 
 internal partial class SettingsForm : Form
 {
+    private const int ReferenceWidth = 644;
+    private const int ReferenceHeight = 432;
+    private const float MinUiScale = 0.78F;
+    private const float MaxUiScale = 1.05F;
+    private const float DesignDpi = 96F;
+
+    private float _uiScale = 1F;
+    private bool _isApplyingResponsiveLayout;
+    private bool _wasMinimized;
+    private bool _restoreLayoutQueued;
+
     public AppConfig Result { get; private set; }
 
     public SettingsForm(AppConfig currentConfig)
@@ -40,13 +51,231 @@ internal partial class SettingsForm : Form
         _sizePresetRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
         _sizeCustomRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
         _transparentBackgroundCheck.CheckedChanged += (_, _) => UpdateTransparentLabel();
+        Resize += (_, _) => HandleResponsiveResize();
 
         ConfigureRoundedButtons();
+        Load += (_, _) =>
+        {
+            FitInitialWindowToScreen();
+            ApplyResponsiveLayout();
+        };
         UpdateSizeControlStates();
+    }
+
+    private void FitInitialWindowToScreen()
+    {
+        var workArea = Screen.FromControl(this).WorkingArea;
+        var maxWidth = Math.Max(MinimumSize.Width, (int)(workArea.Width * 0.9F));
+        var maxHeight = Math.Max(MinimumSize.Height, (int)(workArea.Height * 0.9F));
+        var targetSize = new Size(Math.Min(Width, maxWidth), Math.Min(Height, maxHeight));
+
+        if (targetSize != Size)
+            Size = targetSize;
+    }
+
+    private void HandleResponsiveResize()
+    {
+        if (WindowState == FormWindowState.Minimized)
+        {
+            _wasMinimized = true;
+            return;
+        }
+
+        ApplyResponsiveLayout();
+
+        if (_wasMinimized)
+        {
+            _wasMinimized = false;
+            QueueRestoreLayoutRefresh();
+        }
+    }
+
+    private void QueueRestoreLayoutRefresh()
+    {
+        if (_restoreLayoutQueued || !IsHandleCreated || IsDisposed)
+            return;
+
+        _restoreLayoutQueued = true;
+        BeginInvoke(() =>
+        {
+            _restoreLayoutQueued = false;
+            if (IsDisposed || WindowState == FormWindowState.Minimized)
+                return;
+
+            ApplyResponsiveLayout();
+            ForceTextLayoutRefresh(this);
+            Invalidate(true);
+        });
+    }
+
+    private void ApplyResponsiveLayout()
+    {
+        if (_isApplyingResponsiveLayout
+            || WindowState == FormWindowState.Minimized
+            || ClientSize.Width <= 0
+            || ClientSize.Height <= 0)
+            return;
+
+        _isApplyingResponsiveLayout = true;
+        try
+        {
+            _uiScale = CalculateUiScale();
+            var logicalClientSize = GetLogicalClientSize();
+            var compact = logicalClientSize.Width < 560 || logicalClientSize.Height < 400;
+            var padding = ScaleValue(compact ? 12 : 20);
+            var tabPadding = ScaleValue(compact ? 8 : 12);
+            var rowHeight = ScaleValue(compact ? 38 : 44);
+
+            SuspendLayout();
+            tabs.SuspendLayout();
+            basicTable.SuspendLayout();
+            sizeTable.SuspendLayout();
+            formatTable.SuspendLayout();
+            buttonPanel.SuspendLayout();
+
+            Padding = new Padding(padding);
+            basicTab.Padding = new Padding(tabPadding);
+            sizeTab.Padding = new Padding(tabPadding);
+            formatTab.Padding = new Padding(tabPadding);
+
+            SetColumnWidth(basicTable, 0, compact ? 92 : 110);
+            SetColumnWidth(basicTable, 2, compact ? 68 : 86);
+            SetColumnWidth(sizeTable, 0, compact ? 92 : 110);
+            SetColumnWidth(sizeTable, 2, compact ? 88 : 110);
+            SetColumnWidth(formatTable, 0, compact ? 98 : 120);
+
+            SetAbsoluteRows(basicTable, 5, rowHeight);
+            SetAbsoluteRows(sizeTable, 6, ScaleValue(compact ? 36 : 40));
+            SetAbsoluteRows(formatTable, 4, rowHeight);
+
+            ApplyTableControlSpacing(basicTable, rowHeight, compact);
+            ApplyTableControlSpacing(sizeTable, ScaleValue(compact ? 36 : 40), compact);
+            ApplyTableControlSpacing(formatTable, rowHeight, compact);
+
+            _sizeHelpLabel.MaximumSize = new Size(Math.Max(ScaleValue(240), sizeTable.ClientSize.Width - ScaleValue(12)), 0);
+
+            buttonPanel.Height = ScaleValue(compact ? 40 : 46);
+            saveBtn.Size = new Size(ScaleValue(compact ? 82 : 96), ScaleValue(compact ? 30 : 34));
+            cancelBtn.Size = saveBtn.Size;
+            cancelBtn.Margin = new Padding(0, 0, ScaleValue(compact ? 8 : 12), 0);
+            saveBtn.Font = UiFont(compact ? 9F : 10F);
+            cancelBtn.Font = UiFont(compact ? 9F : 10F);
+            browseBtn.Font = UiFont(compact ? 9F : 10F);
+            showKeyBtn.Size = new Size(showKeyBtn.Width, ScaleValue(compact ? 28 : 30));
+            UpdateShowKeyIcon();
+
+            var buttonRadius = ScaleValue(8);
+            UpdateButtonRegion(showKeyBtn, buttonRadius);
+            UpdateButtonRegion(browseBtn, buttonRadius);
+            UpdateButtonRegion(saveBtn, buttonRadius);
+            UpdateButtonRegion(cancelBtn, buttonRadius);
+        }
+        finally
+        {
+            buttonPanel.ResumeLayout(true);
+            formatTable.ResumeLayout(true);
+            sizeTable.ResumeLayout(true);
+            basicTable.ResumeLayout(true);
+            tabs.ResumeLayout(true);
+            ResumeLayout(true);
+            _isApplyingResponsiveLayout = false;
+        }
+    }
+
+    private float CalculateUiScale()
+    {
+        var logicalClientSize = GetLogicalClientSize();
+        var widthScale = logicalClientSize.Width / ReferenceWidth;
+        var heightScale = logicalClientSize.Height / ReferenceHeight;
+        return Clamp(Math.Min(widthScale, heightScale), MinUiScale, MaxUiScale);
+    }
+
+    private float DpiScale => Math.Max(DesignDpi, DeviceDpi) / DesignDpi;
+
+    private SizeF GetLogicalClientSize() =>
+        new(ClientSize.Width / DpiScale, ClientSize.Height / DpiScale);
+
+    private int ScaleValue(int value) =>
+        Math.Max(1, (int)Math.Round(value * _uiScale * DpiScale));
+
+    private Font UiFont(float size, FontStyle style = FontStyle.Regular) =>
+        new("Microsoft YaHei UI", Math.Max(7.5F, size * _uiScale), style);
+
+    private void SetColumnWidth(TableLayoutPanel table, int columnIndex, int width)
+    {
+        table.ColumnStyles[columnIndex].SizeType = SizeType.Absolute;
+        table.ColumnStyles[columnIndex].Width = ScaleValue(width);
+    }
+
+    private void SetAbsoluteRows(TableLayoutPanel table, int fixedRowCount, int height)
+    {
+        for (var i = 0; i < fixedRowCount && i < table.RowStyles.Count; i++)
+        {
+            table.RowStyles[i].SizeType = SizeType.Absolute;
+            table.RowStyles[i].Height = height;
+        }
+    }
+
+    private void ApplyTableControlSpacing(TableLayoutPanel table, int rowHeight, bool compact)
+    {
+        var verticalMargin = ScaleValue(compact ? 5 : 7);
+        var rightMargin = ScaleValue(compact ? 6 : 8);
+
+        foreach (Control control in table.Controls)
+        {
+            if (control is Label label)
+            {
+                label.Height = rowHeight;
+                label.Font = UiFont(compact ? 9F : 10F);
+                continue;
+            }
+
+            control.Font = UiFont(compact ? 9F : 10F);
+            control.Margin = new Padding(0, verticalMargin, rightMargin, verticalMargin);
+        }
     }
 
     private static decimal Clamp(int value, decimal min, decimal max) =>
         Math.Min(max, Math.Max(min, value));
+
+    private static int Clamp(int value, int min, int max) =>
+        Math.Min(max, Math.Max(min, value));
+
+    private static float Clamp(float value, float min, float max) =>
+        Math.Min(max, Math.Max(min, value));
+
+    private void UpdateShowKeyIcon()
+    {
+        SetScaledButtonImage(
+            showKeyBtn,
+            _apiKeyBox.UseSystemPasswordChar ? "visibility-24.png" : "visibility-off-24.png",
+            20);
+    }
+
+    private void SetScaledButtonImage(Button button, string fileName, int logicalSize)
+    {
+        var pixelSize = ScaleValue(logicalSize);
+        var imageKey = $"{fileName}:{pixelSize}";
+        if (button.Tag as string == imageKey)
+            return;
+
+        var oldImage = button.Image;
+        button.Image = LoadIconImage(fileName, pixelSize);
+        button.Tag = imageKey;
+        oldImage?.Dispose();
+    }
+
+    private static Image LoadIconImage(string fileName, int pixelSize)
+    {
+        using var source = LoadIconImage(fileName);
+        var bitmap = new Bitmap(pixelSize, pixelSize);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+        graphics.DrawImage(source, new Rectangle(0, 0, pixelSize, pixelSize));
+        return bitmap;
+    }
 
     private static void SelectComboValue(ComboBox comboBox, string? value, string fallback)
     {
@@ -110,10 +339,23 @@ internal partial class SettingsForm : Form
     private void ShowKeyBtn_Click(object? sender, EventArgs e)
     {
         _apiKeyBox.UseSystemPasswordChar = !_apiKeyBox.UseSystemPasswordChar;
-        var oldImage = showKeyBtn.Image;
-        showKeyBtn.Image = LoadIconImage(
-            _apiKeyBox.UseSystemPasswordChar ? "visibility-24.png" : "visibility-off-24.png");
-        oldImage?.Dispose();
+        UpdateShowKeyIcon();
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        ApplyResponsiveLayout();
+        QueueRestoreLayoutRefresh();
+    }
+
+    private static void ForceTextLayoutRefresh(Control root)
+    {
+        foreach (Control child in root.Controls)
+            ForceTextLayoutRefresh(child);
+
+        root.PerformLayout();
+        root.Invalidate();
     }
 
     private void BrowseBtn_Click(object? sender, EventArgs e)

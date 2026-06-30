@@ -89,8 +89,9 @@ partial class MainForm
         this.actionBar.SuspendLayout();
 
         this.Text = "GPT Image Playground";
-        this.Size = new Size(960, 720);
-        this.MinimumSize = new Size(640, 480);
+        this.AutoScaleMode = AutoScaleMode.Dpi;
+        this.Size = new Size(960, 680);
+        this.MinimumSize = new Size(420, 360);
         this.StartPosition = FormStartPosition.CenterScreen;
         this.Font = new Font("Microsoft YaHei UI", 10F);
         this.BackColor = Color.FromArgb(245, 247, 250);

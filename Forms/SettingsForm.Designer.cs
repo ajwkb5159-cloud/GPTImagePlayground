@@ -517,14 +517,16 @@ partial class SettingsForm
         cancelBtn.UseVisualStyleBackColor = false;
 
         AcceptButton = saveBtn;
+        AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.White;
         CancelButton = cancelBtn;
         ClientSize = new Size(644, 432);
         Controls.Add(tabs);
         Controls.Add(buttonPanel);
         Font = new Font("Microsoft YaHei UI", 10F);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = false;
+        MinimumSize = new Size(460, 360);
         MinimizeBox = false;
         Name = "SettingsForm";
         Padding = new Padding(20);

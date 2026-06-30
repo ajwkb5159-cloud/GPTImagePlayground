@@ -12,6 +12,11 @@ internal partial class MainForm : Form
 
     private const int EM_SETMARGINS = 0xD3;
     private const int EC_LEFTMARGIN = 0x0001;
+    private const int ReferenceWidth = 960;
+    private const int ReferenceHeight = 680;
+    private const float MinUiScale = 0.72F;
+    private const float MaxUiScale = 1.08F;
+    private const float DesignDpi = 96F;
 
     private readonly ConfigManager _configManager;
     private AppConfig _config;
@@ -23,6 +28,10 @@ internal partial class MainForm : Form
     private Panel? _pendingResponseRow;
     private Panel? _pendingResponseBubble;
     private Label? _pendingResponseLabel;
+    private float _uiScale = 1F;
+    private bool _isApplyingResponsiveLayout;
+    private bool _wasMinimized;
+    private bool _restoreLayoutQueued;
 
     public MainForm()
     {
@@ -41,8 +50,13 @@ internal partial class MainForm : Form
         _sendBtn.Click += SendBtn_Click;
         _promptBox.KeyDown += PromptBox_KeyDown;
 
+        Resize += (_, _) => HandleResponsiveResize();
+
         chatContainer.SizeChanged += (_, _) =>
         {
+            if (WindowState == FormWindowState.Minimized)
+                return;
+
             UpdateChatPanelBounds();
             ReflowChatRows();
         };
@@ -62,9 +76,12 @@ internal partial class MainForm : Form
         // ── Post-handle initialization ──
         Load += (_, _) =>
         {
+            FitInitialWindowToScreen();
+            ApplyResponsiveLayout();
+
             // Fix placeholder text positioning — set 12px left margin on the edit control
             if (_promptBox.IsHandleCreated)
-                SendMessage(_promptBox.Handle, EM_SETMARGINS, (IntPtr)EC_LEFTMARGIN, (IntPtr)12);
+                SendMessage(_promptBox.Handle, EM_SETMARGINS, (IntPtr)EC_LEFTMARGIN, (IntPtr)ScaleValue(12));
 
             UpdateChatPanelBounds();
 
@@ -75,6 +92,209 @@ internal partial class MainForm : Form
     // ═══════════════════════════════════════════════════
     //  Event Handlers
     // ═══════════════════════════════════════════════════
+
+    private void FitInitialWindowToScreen()
+    {
+        var workArea = Screen.FromControl(this).WorkingArea;
+        var maxWidth = Math.Max(MinimumSize.Width, (int)(workArea.Width * 0.88F));
+        var maxHeight = Math.Max(MinimumSize.Height, (int)(workArea.Height * 0.88F));
+        var targetSize = new Size(Math.Min(Width, maxWidth), Math.Min(Height, maxHeight));
+
+        if (targetSize != Size)
+            Size = targetSize;
+
+        Left = workArea.Left + Math.Max(0, (workArea.Width - Width) / 2);
+        Top = workArea.Top + Math.Max(0, (workArea.Height - Height) / 2);
+    }
+
+    private void HandleResponsiveResize()
+    {
+        if (WindowState == FormWindowState.Minimized)
+        {
+            _wasMinimized = true;
+            return;
+        }
+
+        ApplyResponsiveLayout();
+
+        if (_wasMinimized)
+        {
+            _wasMinimized = false;
+            QueueRestoreLayoutRefresh();
+        }
+    }
+
+    private void QueueRestoreLayoutRefresh()
+    {
+        if (_restoreLayoutQueued || !IsHandleCreated || IsDisposed)
+            return;
+
+        _restoreLayoutQueued = true;
+        BeginInvoke(() =>
+        {
+            _restoreLayoutQueued = false;
+            if (IsDisposed || WindowState == FormWindowState.Minimized)
+                return;
+
+            ApplyResponsiveLayout();
+            ForceTextLayoutRefresh(this);
+            Invalidate(true);
+        });
+    }
+
+    private void ApplyResponsiveLayout()
+    {
+        if (_isApplyingResponsiveLayout
+            || WindowState == FormWindowState.Minimized
+            || ClientSize.Width <= 0
+            || ClientSize.Height <= 0)
+            return;
+
+        _isApplyingResponsiveLayout = true;
+        try
+        {
+            _uiScale = CalculateUiScale();
+            var logicalClientSize = GetLogicalClientSize();
+            var compact = logicalClientSize.Width < 560 || logicalClientSize.Height < 520;
+            var tight = logicalClientSize.Width < 470;
+
+            SuspendLayout();
+            topBar.SuspendLayout();
+            inputPanel.SuspendLayout();
+            inputCard.SuspendLayout();
+            actionBar.SuspendLayout();
+
+            topBar.Height = ScaleValue(compact ? 42 : 48);
+            topBar.Padding = new Padding(ScaleValue(compact ? 10 : 16), 0, ScaleValue(8), 0);
+
+            settingsBtn.Text = compact ? "" : " " + "\u8bbe\u7f6e";
+            settingsBtn.Font = UiFont(compact ? 9F : 10F, FontStyle.Bold);
+            settingsBtn.Size = new Size(ScaleValue(compact ? 38 : 94), ScaleValue(compact ? 30 : 34));
+            settingsBtn.Padding = new Padding(ScaleValue(compact ? 4 : 6), 0, ScaleValue(compact ? 4 : 8), 0);
+            SetScaledButtonImage(settingsBtn, "settings-24.png", compact ? 18 : 20);
+
+            titlePanel.Width = Math.Max(
+                ScaleValue(tight ? 150 : 180),
+                Math.Min(ScaleValue(300), ClientSize.Width - settingsBtn.Width - ScaleValue(28)));
+
+            titleIcon.Size = new Size(ScaleValue(compact ? 20 : 24), ScaleValue(compact ? 20 : 24));
+            titleIcon.Location = new Point(0, Math.Max(0, (topBar.Height - titleIcon.Height) / 2));
+
+            titleLabel.Font = UiFont(compact ? 10.5F : 12F, FontStyle.Bold);
+            titleLabel.Location = new Point(ScaleValue(compact ? 28 : 32), 0);
+            titleLabel.Size = new Size(Math.Max(0, titlePanel.Width - titleLabel.Left), topBar.Height);
+
+            chatContainer.Padding = new Padding(ScaleValue(compact ? 8 : 12));
+            _loadingLabel.Font = UiFont(compact ? 12F : 14F, FontStyle.Bold);
+
+            var inputHeight = (int)Math.Round(ClientSize.Height * (compact ? 0.28F : 0.26F));
+            inputPanel.Height = Clamp(inputHeight, ScaleValue(compact ? 124 : 142), ScaleValue(176));
+            inputPanel.Padding = compact
+                ? new Padding(ScaleValue(10), ScaleValue(6), ScaleValue(10), ScaleValue(10))
+                : new Padding(ScaleValue(18), ScaleValue(8), ScaleValue(18), ScaleValue(16));
+
+            inputCard.Padding = new Padding(ScaleValue(compact ? 9 : 12));
+            _thumbnailStrip.Height = ScaleValue(compact ? 42 : 50);
+            promptHost.Padding = compact
+                ? new Padding(ScaleValue(9), ScaleValue(6), ScaleValue(9), ScaleValue(6))
+                : new Padding(ScaleValue(12), ScaleValue(8), ScaleValue(12), ScaleValue(8));
+            actionBar.Height = ScaleValue(compact ? 38 : 44);
+            actionBar.Padding = new Padding(0, ScaleValue(compact ? 6 : 8), 0, 0);
+
+            _attachBtn.Text = tight ? "" : compact ? " " + "\u4e0a\u4f20" : " " + "\u4e0a\u4f20\u56fe\u7247";
+            _attachBtn.Font = UiFont(compact ? 9F : 10F, FontStyle.Bold);
+            _attachBtn.Size = new Size(ScaleValue(tight ? 38 : compact ? 92 : 124), ScaleValue(compact ? 30 : 34));
+            _attachBtn.Padding = new Padding(ScaleValue(compact ? 5 : 8), 0, ScaleValue(compact ? 6 : 10), 0);
+            SetScaledButtonImage(_attachBtn, "upload-image-24.png", compact ? 18 : 20);
+
+            _sendBtn.Text = compact ? "\u751f\u6210" : "\u25b6 \u751f\u6210\u56fe\u50cf";
+            _sendBtn.Font = UiFont(compact ? 8.5F : 9F, FontStyle.Bold);
+            _sendBtn.Size = new Size(ScaleValue(tight ? 74 : compact ? 92 : 116), ScaleValue(compact ? 30 : 34));
+
+            _promptBox.Font = UiFont(compact ? 9F : 10F);
+            if (_promptBox.IsHandleCreated)
+                SendMessage(_promptBox.Handle, EM_SETMARGINS, (IntPtr)EC_LEFTMARGIN, (IntPtr)ScaleValue(compact ? 8 : 12));
+
+            UpdateChatPanelBounds();
+            ReflowChatRows();
+            CenterLoadingLabel();
+        }
+        finally
+        {
+            actionBar.ResumeLayout(true);
+            inputCard.ResumeLayout(true);
+            inputPanel.ResumeLayout(true);
+            topBar.ResumeLayout(true);
+            ResumeLayout(true);
+            _isApplyingResponsiveLayout = false;
+        }
+    }
+
+    private float CalculateUiScale()
+    {
+        var logicalClientSize = GetLogicalClientSize();
+        var widthScale = logicalClientSize.Width / ReferenceWidth;
+        var heightScale = logicalClientSize.Height / ReferenceHeight;
+        return Clamp(Math.Min(widthScale, heightScale), MinUiScale, MaxUiScale);
+    }
+
+    private float DpiScale => Math.Max(DesignDpi, DeviceDpi) / DesignDpi;
+
+    private SizeF GetLogicalClientSize() =>
+        new(ClientSize.Width / DpiScale, ClientSize.Height / DpiScale);
+
+    private int ScaleValue(int value) =>
+        Math.Max(1, (int)Math.Round(value * _uiScale * DpiScale));
+
+    private Font UiFont(float size, FontStyle style = FontStyle.Regular) =>
+        new("Microsoft YaHei UI", Math.Max(7.5F, size * _uiScale), style);
+
+    private static int Clamp(int value, int min, int max) =>
+        Math.Min(max, Math.Max(min, value));
+
+    private static float Clamp(float value, float min, float max) =>
+        Math.Min(max, Math.Max(min, value));
+
+    private void SetScaledButtonImage(Button button, string fileName, int logicalSize)
+    {
+        var pixelSize = ScaleValue(logicalSize);
+        var imageKey = $"{fileName}:{pixelSize}";
+        if (button.Tag as string == imageKey)
+            return;
+
+        var oldImage = button.Image;
+        button.Image = LoadIconImage(fileName, pixelSize);
+        button.Tag = imageKey;
+        oldImage?.Dispose();
+    }
+
+    private static Image LoadIconImage(string fileName, int pixelSize)
+    {
+        using var source = LoadIconImage(fileName);
+        var bitmap = new Bitmap(pixelSize, pixelSize);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+        graphics.DrawImage(source, new Rectangle(0, 0, pixelSize, pixelSize));
+        return bitmap;
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        ApplyResponsiveLayout();
+        QueueRestoreLayoutRefresh();
+    }
+
+    private static void ForceTextLayoutRefresh(Control root)
+    {
+        foreach (Control child in root.Controls)
+            ForceTextLayoutRefresh(child);
+
+        root.PerformLayout();
+        root.Invalidate();
+    }
 
     private void SettingsBtn_Click(object? sender, EventArgs e)
     {
@@ -266,7 +486,7 @@ internal partial class MainForm : Form
     private void AddWelcomeMessage()
     {
         var rowWidth = GetChatRowWidth();
-        var bubble = CreateWelcomeBubble(Math.Min(520, rowWidth - 40));
+        var bubble = CreateWelcomeBubble(GetSystemBubbleMaxWidth(rowWidth));
         _chatPanel.Controls.Add(CreateBubbleRow(bubble, ChatRole.System, rowWidth));
         ResizeChatPanelHeight();
         ScrollChatToBottom();
@@ -274,10 +494,10 @@ internal partial class MainForm : Form
 
     private Panel CreateWelcomeBubble(int maxWidth)
     {
-        var bodyFont = new Font("Microsoft YaHei UI", 9F);
-        var actionFont = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-        var padding = new Padding(10, 8, 10, 8);
-        var contentMaxWidth = Math.Max(260, maxWidth - padding.Horizontal);
+        var bodyFont = UiFont(9F);
+        var actionFont = UiFont(9F, FontStyle.Bold);
+        var padding = new Padding(ScaleValue(10), ScaleValue(8), ScaleValue(10), ScaleValue(8));
+        var contentMaxWidth = Math.Max(ScaleValue(180), maxWidth - padding.Horizontal);
         var panel = new Panel
         {
             BackColor = Color.FromArgb(241, 245, 249),
@@ -331,7 +551,7 @@ internal partial class MainForm : Form
         var icon = new PictureBox
         {
             Image = LoadIconImage(iconFileName),
-            Size = new Size(18, 18),
+            Size = new Size(ScaleValue(18), ScaleValue(18)),
             SizeMode = PictureBoxSizeMode.Zoom,
         };
         row.Controls.Add(icon);
@@ -356,9 +576,9 @@ internal partial class MainForm : Form
         };
         row.Controls.Add(suffix);
 
-        const int gap = 4;
+        var gap = ScaleValue(4);
         var x = 0;
-        var rowHeight = Math.Max(18, new[] { prefix.Height, icon.Height, action.Height, suffix.Height }.Max());
+        var rowHeight = Math.Max(ScaleValue(18), new[] { prefix.Height, icon.Height, action.Height, suffix.Height }.Max());
         foreach (Control control in row.Controls)
         {
             control.Location = new Point(x, Math.Max(0, (rowHeight - control.Height) / 2));
@@ -372,13 +592,13 @@ internal partial class MainForm : Form
     private Panel CreateBubble(ChatMessage msg)
     {
         var rowWidth = GetChatRowWidth();
-        var bubbleWidth = Math.Max((int)(rowWidth * 0.72), 220);
+        var bubbleWidth = GetBubbleMaxWidth(rowWidth);
 
         var bubble = msg.Role switch
         {
             ChatRole.User => CreateUserBubble(msg, bubbleWidth),
             ChatRole.Assistant => CreateAssistantBubble(msg, bubbleWidth),
-            ChatRole.System => CreateSystemBubble(msg, Math.Min(520, rowWidth - 40)),
+            ChatRole.System => CreateSystemBubble(msg, GetSystemBubbleMaxWidth(rowWidth)),
             _ => new Panel(),
         };
 
@@ -390,7 +610,7 @@ internal partial class MainForm : Form
         var row = new Panel
         {
             Width = rowWidth,
-            Height = Math.Max(36, bubble.GetPreferredSize(new Size(bubble.MaximumSize.Width, 0)).Height + 8),
+            Height = Math.Max(ScaleValue(36), bubble.GetPreferredSize(new Size(bubble.MaximumSize.Width, 0)).Height + ScaleValue(8)),
             Margin = new Padding(0, 4, 0, 4),
             BackColor = Color.Transparent,
             Tag = "chat-row",
@@ -414,7 +634,7 @@ internal partial class MainForm : Form
 
     private void LayoutBubbleRow(Panel row, Control bubble, ChatRole role)
     {
-        var availableWidth = Math.Max(200, row.ClientSize.Width);
+        var availableWidth = Math.Max(ScaleValue(180), row.ClientSize.Width);
         if (bubble.AutoSize)
         {
             var preferred = bubble.GetPreferredSize(new Size(availableWidth, 0));
@@ -426,7 +646,7 @@ internal partial class MainForm : Form
             bubble.Width = availableWidth;
         }
 
-        row.Height = Math.Max(36, bubble.Height + 8);
+        row.Height = Math.Max(ScaleValue(36), bubble.Height + ScaleValue(8));
         bubble.Top = 0;
         bubble.Left = role switch
         {
@@ -455,16 +675,29 @@ internal partial class MainForm : Form
         var width = _chatPanel.Width > 0
             ? _chatPanel.Width
             : chatContainer.ClientSize.Width - chatContainer.Padding.Horizontal;
-        return Math.Max(width, 320);
+        return Math.Max(width, ScaleValue(220));
     }
 
     private void UpdateChatPanelBounds()
     {
-        var width = Math.Max(320, chatContainer.ClientSize.Width - chatContainer.Padding.Horizontal);
+        var width = Math.Max(ScaleValue(220), chatContainer.ClientSize.Width - chatContainer.Padding.Horizontal);
         _chatPanel.Location = new Point(chatContainer.Padding.Left, chatContainer.Padding.Top);
         _chatPanel.Width = width;
         _chatPanel.MaximumSize = new Size(width, 0);
         ResizeChatPanelHeight();
+    }
+
+    private int GetBubbleMaxWidth(int rowWidth)
+    {
+        var ratio = rowWidth < ScaleValue(560) ? 0.92F : 0.72F;
+        var minWidth = Math.Min(rowWidth, ScaleValue(180));
+        return Clamp((int)Math.Round(rowWidth * ratio), minWidth, rowWidth);
+    }
+
+    private int GetSystemBubbleMaxWidth(int rowWidth)
+    {
+        var horizontalInset = ScaleValue(rowWidth < ScaleValue(560) ? 16 : 40);
+        return Clamp(rowWidth - horizontalInset, Math.Min(rowWidth, ScaleValue(180)), Math.Min(rowWidth, ScaleValue(520)));
     }
 
     private void ResizeChatPanelHeight()
@@ -490,7 +723,7 @@ internal partial class MainForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             MaximumSize = new Size(maxWidth, 0),
             BackColor = Color.FromArgb(219, 234, 254),
-            Padding = new Padding(12),
+            Padding = new Padding(ScaleValue(12)),
             Margin = new Padding(0),
         };
         panel.Paint += (_, e) =>
@@ -508,9 +741,9 @@ internal partial class MainForm : Form
         {
             Text = string.IsNullOrWhiteSpace(msg.Prompt) ? "(图片)" : msg.Prompt,
             AutoSize = true,
-            MaximumSize = new Size(maxWidth - 30, 0),
+            MaximumSize = new Size(maxWidth - ScaleValue(30), 0),
             ForeColor = Color.FromArgb(30, 41, 59),
-            Font = new Font("Microsoft YaHei UI", 10F),
+            Font = UiFont(10F),
         };
         label.ContextMenuStrip = CreatePromptContextMenu(msg.Prompt);
         panel.Controls.Add(label);
@@ -523,15 +756,15 @@ internal partial class MainForm : Form
             {
                 try
                 {
-                    var thumb = CreateThumbnail(path, 100);
+                    var thumb = CreateThumbnail(path, ScaleValue(100));
                     thumb.Location = new Point(0, y);
                     thumb.Enabled = false;
                     panel.Controls.Add(thumb);
-                    y += thumb.Height + 4;
+                    y += thumb.Height + ScaleValue(4);
                 }
                 catch { /* skip broken images */ }
             }
-            panel.Height = y + 12;
+            panel.Height = y + ScaleValue(12);
         }
 
         return panel;
@@ -566,8 +799,8 @@ internal partial class MainForm : Form
 
     private Panel CreateAssistantBubble(ChatMessage msg, int maxWidth)
     {
-        const int padding = 12;
-        var contentWidth = Math.Max(180, maxWidth - (padding * 2));
+        var padding = ScaleValue(12);
+        var contentWidth = Math.Max(ScaleValue(160), maxWidth - (padding * 2));
         var panel = new Panel
         {
             AutoSize = false,
@@ -588,7 +821,7 @@ internal partial class MainForm : Form
         };
 
         int y = padding;
-        var panelWidth = Math.Max(220, Math.Min(maxWidth, contentWidth + (padding * 2)));
+        var panelWidth = Math.Max(ScaleValue(180), Math.Min(maxWidth, contentWidth + (padding * 2)));
 
         // Image preview
         if (!string.IsNullOrWhiteSpace(msg.GeneratedImageDataUrl)
@@ -597,12 +830,13 @@ internal partial class MainForm : Form
             try
             {
                 var previewImage = LoadGeneratedPreviewImage(msg);
-                var previewWidth = Math.Min(520, contentWidth);
+                var previewWidth = Math.Min(ScaleValue(520), contentWidth);
+                var previewHeight = Clamp((int)Math.Round(previewWidth * 0.58F), ScaleValue(150), ScaleValue(300));
                 var pictureBox = new PictureBox
                 {
                     Image = previewImage,
                     SizeMode = PictureBoxSizeMode.Zoom,
-                    Size = new Size(previewWidth, 300),
+                    Size = new Size(previewWidth, previewHeight),
                     Location = new Point(padding, y),
                 };
                 pictureBox.Click += (_, _) =>
@@ -614,7 +848,7 @@ internal partial class MainForm : Form
                 pictureBox.Cursor = Cursors.Hand;
                 panel.Controls.Add(pictureBox);
                 panelWidth = Math.Max(panelWidth, pictureBox.Right + padding);
-                y += pictureBox.Height + 8;
+                y += pictureBox.Height + ScaleValue(8);
             }
             catch { /* skip if image can't load */ }
         }
@@ -628,12 +862,12 @@ internal partial class MainForm : Form
                 AutoSize = true,
                 MaximumSize = new Size(contentWidth, 0),
                 ForeColor = Color.FromArgb(100, 116, 139),
-                Font = new Font("Microsoft YaHei UI", 8F),
+                Font = UiFont(8F),
                 Location = new Point(padding, y),
             };
             panel.Controls.Add(pathLabel);
             panelWidth = Math.Max(panelWidth, Math.Min(maxWidth, pathLabel.Right + padding));
-            y += pathLabel.Height + 4;
+            y += pathLabel.Height + ScaleValue(4);
         }
 
         // Usage info
@@ -645,12 +879,12 @@ internal partial class MainForm : Form
                 AutoSize = true,
                 MaximumSize = new Size(contentWidth, 0),
                 ForeColor = Color.FromArgb(100, 116, 139),
-                Font = new Font("Microsoft YaHei UI", 8F),
+                Font = UiFont(8F),
                 Location = new Point(padding, y),
             };
             panel.Controls.Add(usageLabel);
             panelWidth = Math.Max(panelWidth, Math.Min(maxWidth, usageLabel.Right + padding));
-            y += usageLabel.Height + 4;
+            y += usageLabel.Height + ScaleValue(4);
         }
 
         panel.Size = new Size(Math.Min(maxWidth, panelWidth), y + padding);
@@ -692,12 +926,12 @@ internal partial class MainForm : Form
         {
             Text = msg.ErrorText ?? "",
             AutoSize = true,
-            MaximumSize = new Size(maxWidth - 30, 0),
+            MaximumSize = new Size(maxWidth - ScaleValue(30), 0),
             ForeColor = isError ? Color.FromArgb(185, 28, 28) : Color.FromArgb(71, 85, 105),
             BackColor = isError ? Color.FromArgb(254, 242, 242) : Color.FromArgb(241, 245, 249),
-            Font = new Font("Microsoft YaHei UI", 9F),
+            Font = UiFont(9F),
             TextAlign = ContentAlignment.MiddleCenter,
-            Padding = new Padding(8, 6, 8, 6),
+            Padding = new Padding(ScaleValue(8), ScaleValue(6), ScaleValue(8), ScaleValue(6)),
         };
 
         var panel = new Panel
@@ -716,7 +950,7 @@ internal partial class MainForm : Form
         RemovePendingResponseBubble();
 
         var rowWidth = GetChatRowWidth();
-        var bubbleWidth = Math.Max((int)(rowWidth * 0.72), 220);
+        var bubbleWidth = GetBubbleMaxWidth(rowWidth);
         _pendingResponseBubble = CreatePendingBubble(text, bubbleWidth, false);
         _pendingResponseLabel = _pendingResponseBubble.Controls.OfType<Label>().FirstOrDefault();
         _pendingResponseRow = CreateBubbleRow(_pendingResponseBubble, ChatRole.Assistant, rowWidth);
@@ -731,9 +965,9 @@ internal partial class MainForm : Form
         {
             Text = isError ? text : $"⏳ {text}",
             AutoSize = true,
-            MaximumSize = new Size(maxWidth - 30, 0),
+            MaximumSize = new Size(maxWidth - ScaleValue(30), 0),
             ForeColor = isError ? Color.FromArgb(185, 28, 28) : Color.FromArgb(71, 85, 105),
-            Font = new Font("Microsoft YaHei UI", 9F),
+            Font = UiFont(9F),
             Padding = new Padding(0),
         };
 
@@ -743,7 +977,7 @@ internal partial class MainForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             MaximumSize = new Size(maxWidth, 0),
             BackColor = isError ? Color.FromArgb(254, 242, 242) : Color.White,
-            Padding = new Padding(12),
+            Padding = new Padding(ScaleValue(12)),
             Margin = new Padding(0),
         };
 
@@ -782,7 +1016,7 @@ internal partial class MainForm : Form
         }
 
         var rowWidth = GetChatRowWidth();
-        var bubbleWidth = Math.Max((int)(rowWidth * 0.72), 220);
+        var bubbleWidth = GetBubbleMaxWidth(rowWidth);
         _pendingResponseRow.Controls.Clear();
         _pendingResponseBubble = CreatePendingBubble(text, bubbleWidth, true);
         _pendingResponseLabel = _pendingResponseBubble.Controls.OfType<Label>().FirstOrDefault();
@@ -801,7 +1035,7 @@ internal partial class MainForm : Form
         }
 
         var rowWidth = GetChatRowWidth();
-        var bubbleWidth = Math.Max((int)(rowWidth * 0.72), 220);
+        var bubbleWidth = GetBubbleMaxWidth(rowWidth);
         var bubble = CreateAssistantBubble(msg, bubbleWidth);
         _pendingResponseRow.Controls.Clear();
         _pendingResponseRow.Controls.Add(bubble);
@@ -833,7 +1067,7 @@ internal partial class MainForm : Form
 
     private void AddThumbnail(string imagePath)
     {
-        var thumb = CreateThumbnail(imagePath, 40);
+        var thumb = CreateThumbnail(imagePath, ScaleValue(40));
         thumb.Cursor = Cursors.Hand;
         thumb.Click += (_, _) =>
         {
