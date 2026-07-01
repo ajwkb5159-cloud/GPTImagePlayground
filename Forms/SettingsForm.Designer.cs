@@ -520,7 +520,7 @@ partial class SettingsForm
         lblConcurrency.Location = new Point(3, 220);
         lblConcurrency.Name = "lblConcurrency";
         lblConcurrency.Size = new Size(114, 44);
-        lblConcurrency.Text = "最大并发数";
+        lblConcurrency.Text = "同时生成图片数";
         lblConcurrency.TextAlign = ContentAlignment.MiddleLeft;
 
         _concurrencyNumeric.Anchor = AnchorStyles.Left;

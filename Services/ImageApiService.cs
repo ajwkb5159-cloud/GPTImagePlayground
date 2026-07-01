@@ -123,6 +123,9 @@ internal class ImageApiService
     {
         var totalCount = Math.Max(1, _config.ImageCount);
         var maxConcurrency = Clamp(_config.MaxConcurrency, 1, Math.Min(10, totalCount));
+        var referenceImages = imagePaths.Count > 0
+            ? await LoadReferenceImagesAsync(imagePaths, cancellationToken).ConfigureAwait(false)
+            : [];
         var sw = Stopwatch.StartNew();
         using var semaphore = new SemaphoreSlim(maxConcurrency);
 
@@ -185,12 +188,12 @@ internal class ImageApiService
                 string? requestDebugInfo;
                 string requestEndpoint;
                 var requestSw = Stopwatch.StartNew();
-                if (imagePaths.Count > 0)
+                if (referenceImages.Count > 0)
                 {
                     (response, requestDebugInfo) = await SendEditRequestWithN1Async(
                             httpClient,
                             prompt,
-                            imagePaths,
+                            referenceImages,
                             cancellationToken)
                         .ConfigureAwait(false);
                     requestEndpoint = $"{_config.BaseUrl.TrimEnd('/')}/images/edits";
@@ -326,17 +329,48 @@ internal class ImageApiService
     private async Task<(HttpResponseMessage response, string requestDebug)> SendEditRequestWithN1Async(
         HttpClient httpClient,
         string prompt,
+        List<ReferenceImagePayload> referenceImages,
+        CancellationToken cancellationToken)
+    {
+        return await SendEditRequestCoreAsync(httpClient, prompt, referenceImages, 1, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<List<ReferenceImagePayload>> LoadReferenceImagesAsync(
         List<string> imagePaths,
         CancellationToken cancellationToken)
     {
-        return await SendEditRequestCoreAsync(httpClient, prompt, imagePaths, 1, cancellationToken)
-            .ConfigureAwait(false);
+        var referenceImages = new List<ReferenceImagePayload>();
+        foreach (var imagePath in imagePaths)
+        {
+            var imageBytes = await File.ReadAllBytesAsync(imagePath, cancellationToken)
+                .ConfigureAwait(false);
+            referenceImages.Add(new ReferenceImagePayload(
+                Path.GetFileName(imagePath),
+                GetMimeType(imagePath),
+                imageBytes));
+        }
+
+        return referenceImages;
     }
 
     private async Task<(HttpResponseMessage response, string requestDebug)> SendEditRequestCoreAsync(
         HttpClient httpClient,
         string prompt,
         List<string> imagePaths,
+        int requestCount,
+        CancellationToken cancellationToken)
+    {
+        var referenceImages = await LoadReferenceImagesAsync(imagePaths, cancellationToken)
+            .ConfigureAwait(false);
+        return await SendEditRequestCoreAsync(httpClient, prompt, referenceImages, requestCount, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<(HttpResponseMessage response, string requestDebug)> SendEditRequestCoreAsync(
+        HttpClient httpClient,
+        string prompt,
+        List<ReferenceImagePayload> referenceImages,
         int requestCount,
         CancellationToken cancellationToken)
     {
@@ -353,16 +387,13 @@ internal class ImageApiService
             formData.Add(new StringContent("transparent"), "background");
 
         var imageNames = new List<string>();
-        foreach (var imagePath in imagePaths)
+        foreach (var referenceImage in referenceImages)
         {
-            var imageBytes = await File.ReadAllBytesAsync(imagePath, cancellationToken)
-                .ConfigureAwait(false);
-            var imageContent = new ByteArrayContent(imageBytes);
+            var imageContent = new ByteArrayContent(referenceImage.Bytes);
             imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(
-                GetMimeType(imagePath));
-            var fileName = Path.GetFileName(imagePath);
-            formData.Add(imageContent, "image", fileName);
-            imageNames.Add(fileName);
+                referenceImage.MimeType);
+            formData.Add(imageContent, "image", referenceImage.FileName);
+            imageNames.Add(referenceImage.FileName);
         }
 
         var endpoint = $"{_config.BaseUrl.TrimEnd('/')}/images/edits";
@@ -572,6 +603,8 @@ internal class ImageApiService
             ErrorMessage = errorMessage,
         };
     }
+
+    private sealed record ReferenceImagePayload(string FileName, string MimeType, byte[] Bytes);
 }
 
 internal class GenerateResult
