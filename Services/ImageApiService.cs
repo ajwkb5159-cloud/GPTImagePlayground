@@ -122,7 +122,7 @@ internal class ImageApiService
         CancellationToken cancellationToken)
     {
         var totalCount = Math.Max(1, _config.ImageCount);
-        var maxConcurrency = Clamp(_config.MaxConcurrency, 1, Math.Min(10, totalCount));
+        var maxConcurrency = Clamp(_config.MaxConcurrency, 1, Math.Min(5, totalCount));
         var referenceImages = imagePaths.Count > 0
             ? await LoadReferenceImagesAsync(imagePaths, cancellationToken).ConfigureAwait(false)
             : [];
