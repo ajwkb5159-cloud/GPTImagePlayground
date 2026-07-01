@@ -15,6 +15,7 @@ internal partial class SettingsForm : Form
     private bool _wasMinimized;
     private bool _restoreLayoutQueued;
     private readonly Dictionary<(int SizeHundredths, FontStyle Style), Font> _fontCache = [];
+    private int _savedImageCount;
 
     public AppConfig Result { get; private set; }
 
@@ -152,6 +153,8 @@ internal partial class SettingsForm : Form
             SetAbsoluteRows(basicTable, 5, rowHeight);
             SetAbsoluteRows(sizeTable, 6, ScaleValue(compact ? 36 : 40));
             SetAbsoluteRows(formatTable, 6, rowHeight);
+            formatTable.RowStyles[6].SizeType = SizeType.Absolute;
+            formatTable.RowStyles[6].Height = ScaleValue(compact ? 76 : 72);
 
             ApplyTableControlSpacing(basicTable, rowHeight, compact);
             ApplyTableControlSpacing(sizeTable, ScaleValue(compact ? 36 : 40), compact);
@@ -249,7 +252,9 @@ internal partial class SettingsForm : Form
             if (control is Label label)
             {
                 label.Height = rowHeight;
-                label.Font = UiFont(compact ? 9F : 10F);
+                label.Font = label == lblConcurrencyHint
+                    ? UiFont(8F)
+                    : UiFont(compact ? 9F : 10F);
                 continue;
             }
 
@@ -363,6 +368,25 @@ internal partial class SettingsForm : Form
     {
         _concurrentCheck.Text = _concurrentCheck.Checked ? "true" : "false";
         _concurrencyNumeric.Enabled = _concurrentCheck.Checked;
+        if (_concurrentCheck.Checked)
+        {
+            _imageCountNumeric.Enabled = true;
+            if (_savedImageCount > 0)
+            {
+                _imageCountNumeric.Value = Clamp(
+                    _savedImageCount,
+                    _imageCountNumeric.Minimum,
+                    _imageCountNumeric.Maximum);
+            }
+
+            return;
+        }
+
+        if (_imageCountNumeric.Enabled || _savedImageCount <= 0)
+            _savedImageCount = (int)_imageCountNumeric.Value;
+
+        _imageCountNumeric.Value = 1;
+        _imageCountNumeric.Enabled = false;
     }
 
     private void ShowKeyBtn_Click(object? sender, EventArgs e)

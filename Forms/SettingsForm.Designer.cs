@@ -116,6 +116,7 @@ partial class SettingsForm
         _concurrentCheck = new CheckBox();
         lblConcurrency = new Label();
         _concurrencyNumeric = new NumericUpDown();
+        lblConcurrencyHint = new Label();
         buttonPanel = new FlowLayoutPanel();
         saveBtn = new Button();
         cancelBtn = new Button();
@@ -429,12 +430,14 @@ partial class SettingsForm
         formatTable.Controls.Add(_concurrentCheck, 1, 4);
         formatTable.Controls.Add(lblConcurrency, 0, 5);
         formatTable.Controls.Add(_concurrencyNumeric, 1, 5);
+        formatTable.Controls.Add(lblConcurrencyHint, 0, 6);
         formatTable.Dock = DockStyle.Fill;
         formatTable.Location = new Point(12, 12);
         formatTable.Name = "formatTable";
-        formatTable.RowCount = 7;
+        formatTable.RowCount = 8;
         for (var i = 0; i < 6; i++)
             formatTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+        formatTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
         formatTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         formatTable.Size = new Size(572, 292);
         formatTable.TabIndex = 0;
@@ -520,18 +523,30 @@ partial class SettingsForm
         lblConcurrency.Location = new Point(3, 220);
         lblConcurrency.Name = "lblConcurrency";
         lblConcurrency.Size = new Size(114, 44);
-        lblConcurrency.Text = "同时生成图片数";
+        lblConcurrency.Text = "最大生成图片数";
         lblConcurrency.TextAlign = ContentAlignment.MiddleLeft;
 
         _concurrencyNumeric.Anchor = AnchorStyles.Left;
         _concurrencyNumeric.Location = new Point(120, 230);
         _concurrencyNumeric.Margin = new Padding(0, 7, 8, 7);
-        _concurrencyNumeric.Maximum = new decimal(new int[] { 10, 0, 0, 0 });
+        _concurrencyNumeric.Maximum = new decimal(new int[] { 5, 0, 0, 0 });
         _concurrencyNumeric.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
         _concurrencyNumeric.Name = "_concurrencyNumeric";
         _concurrencyNumeric.Size = new Size(96, 24);
         _concurrencyNumeric.TabIndex = 5;
         _concurrencyNumeric.Value = new decimal(new int[] { 4, 0, 0, 0 });
+
+        formatTable.SetColumnSpan(lblConcurrencyHint, 2);
+        lblConcurrencyHint.Dock = DockStyle.Fill;
+        lblConcurrencyHint.Font = new Font("Microsoft YaHei UI", 8F);
+        lblConcurrencyHint.ForeColor = SystemColors.GrayText;
+        lblConcurrencyHint.Location = new Point(3, 264);
+        lblConcurrencyHint.Margin = new Padding(3, 0, 3, 0);
+        lblConcurrencyHint.Name = "lblConcurrencyHint";
+        lblConcurrencyHint.Size = new Size(566, 72);
+        lblConcurrencyHint.TabIndex = 6;
+        lblConcurrencyHint.Text = "提示：开启并发模式后，每个请求生成 1 张图，通过同时发送多个请求实现多图生成。数量决定总共生成多少张，最大生成图片数决定最多同时并发几个请求。例如数量=5 最大=4，则 4 个请求并发、剩余排队，最终生成 5 张。";
+        lblConcurrencyHint.TextAlign = ContentAlignment.MiddleLeft;
 
         buttonPanel.Controls.Add(saveBtn);
         buttonPanel.Controls.Add(cancelBtn);
@@ -571,13 +586,13 @@ partial class SettingsForm
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.White;
         CancelButton = cancelBtn;
-        ClientSize = new Size(644, 432);
+        ClientSize = new Size(644, 468);
         Controls.Add(tabs);
         Controls.Add(buttonPanel);
         Font = new Font("Microsoft YaHei UI", 10F);
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = false;
-        MinimumSize = new Size(460, 360);
+        MinimumSize = new Size(460, 420);
         MinimizeBox = false;
         Name = "SettingsForm";
         Padding = new Padding(20);
@@ -617,4 +632,5 @@ partial class SettingsForm
     private Label lblImageCount;
     private Label lblConcurrent;
     private Label lblConcurrency;
+    private Label lblConcurrencyHint;
 }
