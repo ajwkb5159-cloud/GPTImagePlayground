@@ -43,6 +43,8 @@ internal partial class SettingsForm : Form
         UpdateTransparentLabel();
         SelectComboValue(_moderationBox, currentConfig.Moderation, "auto");
         _imageCountNumeric.Value = Clamp(currentConfig.ImageCount, _imageCountNumeric.Minimum, _imageCountNumeric.Maximum);
+        _concurrentCheck.Checked = currentConfig.UseConcurrentStrategy;
+        _concurrencyNumeric.Value = Clamp(currentConfig.MaxConcurrency, _concurrencyNumeric.Minimum, _concurrencyNumeric.Maximum);
 
         showKeyBtn.Click += ShowKeyBtn_Click;
         browseBtn.Click += BrowseBtn_Click;
@@ -52,6 +54,7 @@ internal partial class SettingsForm : Form
         _sizePresetRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
         _sizeCustomRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
         _transparentBackgroundCheck.CheckedChanged += (_, _) => UpdateTransparentLabel();
+        _concurrentCheck.CheckedChanged += (_, _) => UpdateConcurrencyControlStates();
         Resize += (_, _) => HandleResponsiveResize();
 
         ConfigureRoundedButtons();
@@ -61,6 +64,7 @@ internal partial class SettingsForm : Form
             ApplyResponsiveLayout();
         };
         UpdateSizeControlStates();
+        UpdateConcurrencyControlStates();
     }
 
     private void FitInitialWindowToScreen()
@@ -147,7 +151,7 @@ internal partial class SettingsForm : Form
 
             SetAbsoluteRows(basicTable, 5, rowHeight);
             SetAbsoluteRows(sizeTable, 6, ScaleValue(compact ? 36 : 40));
-            SetAbsoluteRows(formatTable, 4, rowHeight);
+            SetAbsoluteRows(formatTable, 6, rowHeight);
 
             ApplyTableControlSpacing(basicTable, rowHeight, compact);
             ApplyTableControlSpacing(sizeTable, ScaleValue(compact ? 36 : 40), compact);
@@ -355,6 +359,12 @@ internal partial class SettingsForm : Form
         _transparentBackgroundCheck.Text = _transparentBackgroundCheck.Checked ? "true" : "false";
     }
 
+    private void UpdateConcurrencyControlStates()
+    {
+        _concurrentCheck.Text = _concurrentCheck.Checked ? "true" : "false";
+        _concurrencyNumeric.Enabled = _concurrentCheck.Checked;
+    }
+
     private void ShowKeyBtn_Click(object? sender, EventArgs e)
     {
         _apiKeyBox.UseSystemPasswordChar = !_apiKeyBox.UseSystemPasswordChar;
@@ -410,6 +420,8 @@ internal partial class SettingsForm : Form
             TransparentBackground = _transparentBackgroundCheck.Checked,
             Moderation = _moderationBox.SelectedItem?.ToString() ?? "auto",
             ImageCount = (int)_imageCountNumeric.Value,
+            UseConcurrentStrategy = _concurrentCheck.Checked,
+            MaxConcurrency = (int)_concurrencyNumeric.Value,
         };
 
         if (string.IsNullOrWhiteSpace(Result.BaseUrl))

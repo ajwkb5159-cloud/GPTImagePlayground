@@ -479,10 +479,7 @@ internal partial class MainForm : Form
                     AddChatBubble(assistantMsg);
             }
 
-            AddSystemMessage(
-                $"✅ 完成！生成 {result.SavedPaths.Count} 张图片，" +
-                $"服务器耗时 {result.ServerTimeSeconds:F0} 秒，" +
-                $"总耗时 {result.TotalTimeSeconds:F0} 秒。");
+            AddSystemMessage(BuildCompletionMessage(result));
         }
         catch (Exception ex)
         {
@@ -569,6 +566,25 @@ internal partial class MainForm : Form
     private void AddSystemMessage(string text)
     {
         AddChatBubble(ChatMessage.SystemMessage(text));
+    }
+
+    private static string BuildCompletionMessage(GenerateResult result)
+    {
+        var successCount = result.SuccessCount > 0 ? result.SuccessCount : result.SavedPaths.Count;
+        var totalCount = result.TotalCount > 0 ? result.TotalCount : successCount;
+        var serverTimeLabel = totalCount > 1 ? "服务器最长耗时" : "服务器耗时";
+        var message = totalCount > 1
+            ? $"✅ 完成！生成 {successCount}/{totalCount} 张图片，{serverTimeLabel} {result.ServerTimeSeconds:F0} 秒，总耗时 {result.TotalTimeSeconds:F0} 秒。"
+            : $"✅ 完成！生成 {successCount} 张图片，{serverTimeLabel} {result.ServerTimeSeconds:F0} 秒，总耗时 {result.TotalTimeSeconds:F0} 秒。";
+
+        if (result.FailedMessages.Count == 0)
+            return message;
+
+        return message +
+            Environment.NewLine +
+            $"{result.FailedMessages.Count} 个子请求失败：" +
+            Environment.NewLine +
+            string.Join(Environment.NewLine, result.FailedMessages.Select(failure => $"  - {failure}"));
     }
 
     private void AddWelcomeMessage()
