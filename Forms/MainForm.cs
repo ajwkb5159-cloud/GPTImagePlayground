@@ -12,6 +12,7 @@ internal partial class MainForm : Form
 
     private const int EM_SETMARGINS = 0xD3;
     private const int EC_LEFTMARGIN = 0x0001;
+    private const int WM_MOUSEWHEEL = 0x020A;
     private const int ReferenceWidth = 960;
     private const int ReferenceHeight = 680;
     private const float MinUiScale = 0.72F;
@@ -64,7 +65,8 @@ internal partial class MainForm : Form
             UpdateChatPanelBounds();
             ReflowChatRows();
         };
-        chatContainer.Scroll += (_, _) => RememberChatScrollState();
+        chatContainer.MouseWheel += ChatContainer_MouseWheel;
+        _chatPanel.MouseWheel += ChatContainer_MouseWheel;
 
         _loadingOverlay.SizeChanged += (_, _) => CenterLoadingLabel();
 
@@ -290,6 +292,39 @@ internal partial class MainForm : Form
     private static float Clamp(float value, float min, float max) =>
         Math.Min(max, Math.Max(min, value));
 
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_MOUSEWHEEL && TryScrollChatFromMouseWheel(m.WParam, Cursor.Position))
+            return;
+
+        base.WndProc(ref m);
+    }
+
+    private void ChatContainer_MouseWheel(object? sender, MouseEventArgs e)
+    {
+        ScrollChatByWheelDelta(e.Delta);
+    }
+
+    private bool TryScrollChatFromMouseWheel(IntPtr wParam, Point screenPoint)
+    {
+        if (chatContainer.IsDisposed || !chatContainer.ClientRectangle.Contains(chatContainer.PointToClient(screenPoint)))
+            return false;
+
+        var delta = unchecked((short)((wParam.ToInt64() >> 16) & 0xffff));
+        ScrollChatByWheelDelta(delta);
+        return true;
+    }
+
+    private void ScrollChatByWheelDelta(int delta)
+    {
+        if (delta == 0 || GetChatMaxScrollY() <= 0)
+            return;
+
+        var wheelStep = Math.Max(ScaleValue(48), SystemInformation.MouseWheelScrollLines * ScaleValue(16));
+        var targetScrollY = GetChatScrollY() - Math.Sign(delta) * wheelStep;
+        RestoreChatScroll(Clamp(targetScrollY, 0, GetChatMaxScrollY()));
+    }
+
     private void SetScaledButtonImage(Button button, string fileName, int logicalSize)
     {
         var pixelSize = ScaleValue(logicalSize);
@@ -444,10 +479,7 @@ internal partial class MainForm : Form
                     AddChatBubble(assistantMsg);
             }
 
-            AddSystemMessage(
-                $"✅ 完成！生成 {result.SavedPaths.Count} 张图片，" +
-                $"服务器耗时 {result.ServerTimeSeconds:F0} 秒，" +
-                $"总耗时 {result.TotalTimeSeconds:F0} 秒。");
+            AddSystemMessage(BuildCompletionMessage(result));
         }
         catch (Exception ex)
         {
@@ -524,25 +556,9 @@ internal partial class MainForm : Form
         {
             BeginInvoke(() =>
             {
-                if (_chatPanel.Parent is ScrollableControl parent)
-                {
-                    StackChatRows();
-                    ResizeChatPanelHeight();
-                    var viewportHeight = Math.Max(0, parent.ClientSize.Height - parent.Padding.Vertical);
-                    if (GetChatContentHeight() <= viewportHeight)
-                    {
-                        parent.AutoScrollPosition = Point.Empty;
-                        _chatPanel.Location = new Point(parent.Padding.Left, parent.Padding.Top);
-                        _lastChatScrollY = 0;
-                        _lastChatWasAtBottom = true;
-                        return;
-                    }
-
-                    var scrollY = Math.Max(0, parent.Padding.Top + _chatPanel.Height + parent.Padding.Bottom - parent.ClientSize.Height);
-                    parent.AutoScrollPosition = new Point(0, scrollY);
-                    _lastChatScrollY = scrollY;
-                    _lastChatWasAtBottom = true;
-                }
+                StackChatRows();
+                ResizeChatPanelHeight();
+                RestoreChatScroll(GetChatMaxScrollY());
             });
         }
     }
@@ -550,6 +566,25 @@ internal partial class MainForm : Form
     private void AddSystemMessage(string text)
     {
         AddChatBubble(ChatMessage.SystemMessage(text));
+    }
+
+    private static string BuildCompletionMessage(GenerateResult result)
+    {
+        var successCount = result.SuccessCount > 0 ? result.SuccessCount : result.SavedPaths.Count;
+        var totalCount = result.TotalCount > 0 ? result.TotalCount : successCount;
+        var serverTimeLabel = totalCount > 1 ? "服务器最长耗时" : "服务器耗时";
+        var message = totalCount > 1
+            ? $"✅ 完成！生成 {successCount}/{totalCount} 张图片，{serverTimeLabel} {result.ServerTimeSeconds:F0} 秒，总耗时 {result.TotalTimeSeconds:F0} 秒。"
+            : $"✅ 完成！生成 {successCount} 张图片，{serverTimeLabel} {result.ServerTimeSeconds:F0} 秒，总耗时 {result.TotalTimeSeconds:F0} 秒。";
+
+        if (result.FailedMessages.Count == 0)
+            return message;
+
+        return message +
+            Environment.NewLine +
+            $"{result.FailedMessages.Count} 个子请求失败：" +
+            Environment.NewLine +
+            string.Join(Environment.NewLine, result.FailedMessages.Select(failure => $"  - {failure}"));
     }
 
     private void AddWelcomeMessage()
@@ -758,10 +793,10 @@ internal partial class MainForm : Form
     }
 
     private int GetChatScrollY() =>
-        Math.Max(0, -chatContainer.AutoScrollPosition.Y);
+        Math.Max(0, chatContainer.Padding.Top - _chatPanel.Top);
 
     private int GetChatMaxScrollY() =>
-        Math.Max(0, chatContainer.Padding.Top + _chatPanel.Height + chatContainer.Padding.Bottom - chatContainer.ClientSize.Height);
+        Math.Max(0, GetChatContentHeight() + chatContainer.Padding.Vertical - chatContainer.ClientSize.Height);
 
     private bool IsChatScrolledToBottom()
     {
@@ -777,7 +812,6 @@ internal partial class MainForm : Form
         var maxScrollY = GetChatMaxScrollY();
         if (maxScrollY <= 0)
         {
-            chatContainer.AutoScrollPosition = Point.Empty;
             _chatPanel.Location = new Point(chatContainer.Padding.Left, chatContainer.Padding.Top);
             _lastChatScrollY = 0;
             _lastChatWasAtBottom = true;
@@ -785,7 +819,7 @@ internal partial class MainForm : Form
         }
 
         var clampedScrollY = Math.Min(scrollY, maxScrollY);
-        chatContainer.AutoScrollPosition = new Point(0, clampedScrollY);
+        _chatPanel.Location = new Point(chatContainer.Padding.Left, chatContainer.Padding.Top - clampedScrollY);
         _lastChatScrollY = clampedScrollY;
         _lastChatWasAtBottom = clampedScrollY >= maxScrollY - ScaleValue(4);
     }
@@ -819,7 +853,7 @@ internal partial class MainForm : Form
     private void UpdateChatPanelBounds()
     {
         var width = Math.Max(ScaleValue(220), chatContainer.ClientSize.Width - chatContainer.Padding.Horizontal);
-        _chatPanel.Location = new Point(chatContainer.Padding.Left, chatContainer.Padding.Top);
+        _chatPanel.Left = chatContainer.Padding.Left;
         _chatPanel.Width = width;
         _chatPanel.MaximumSize = new Size(width, 0);
         StackChatRows();
@@ -843,9 +877,7 @@ internal partial class MainForm : Form
     {
         if (_chatPanel.IsDisposed) return;
 
-        var contentHeight = GetChatContentHeight();
-        var viewportHeight = Math.Max(0, chatContainer.ClientSize.Height - chatContainer.Padding.Vertical);
-        _chatPanel.Height = Math.Max(contentHeight, viewportHeight);
+        _chatPanel.Height = GetChatContentHeight();
     }
 
     private int GetChatContentHeight()

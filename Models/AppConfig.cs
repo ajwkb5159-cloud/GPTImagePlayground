@@ -18,4 +18,6 @@ internal class AppConfig
     public bool TransparentBackground { get; set; }
     public string Moderation { get; set; } = "auto";
     public int ImageCount { get; set; } = 1;
+    public bool UseConcurrentStrategy { get; set; } = true;
+    public int MaxConcurrency { get; set; } = 4;
 }

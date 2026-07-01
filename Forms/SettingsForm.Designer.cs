@@ -35,6 +35,8 @@ partial class SettingsForm
     private CheckBox _transparentBackgroundCheck;
     private ComboBox _moderationBox;
     private NumericUpDown _imageCountNumeric;
+    private CheckBox _concurrentCheck;
+    private NumericUpDown _concurrencyNumeric;
 
     private FlowLayoutPanel buttonPanel;
     private Button saveBtn;
@@ -110,6 +112,10 @@ partial class SettingsForm
         _moderationBox = new ComboBox();
         lblImageCount = new Label();
         _imageCountNumeric = new NumericUpDown();
+        lblConcurrent = new Label();
+        _concurrentCheck = new CheckBox();
+        lblConcurrency = new Label();
+        _concurrencyNumeric = new NumericUpDown();
         buttonPanel = new FlowLayoutPanel();
         saveBtn = new Button();
         cancelBtn = new Button();
@@ -124,6 +130,7 @@ partial class SettingsForm
         ((System.ComponentModel.ISupportInitialize)_customHeightNumeric).BeginInit();
         formatTable.SuspendLayout();
         ((System.ComponentModel.ISupportInitialize)_imageCountNumeric).BeginInit();
+        ((System.ComponentModel.ISupportInitialize)_concurrencyNumeric).BeginInit();
         buttonPanel.SuspendLayout();
         SuspendLayout();
 
@@ -418,11 +425,15 @@ partial class SettingsForm
         formatTable.Controls.Add(_moderationBox, 1, 2);
         formatTable.Controls.Add(lblImageCount, 0, 3);
         formatTable.Controls.Add(_imageCountNumeric, 1, 3);
+        formatTable.Controls.Add(lblConcurrent, 0, 4);
+        formatTable.Controls.Add(_concurrentCheck, 1, 4);
+        formatTable.Controls.Add(lblConcurrency, 0, 5);
+        formatTable.Controls.Add(_concurrencyNumeric, 1, 5);
         formatTable.Dock = DockStyle.Fill;
         formatTable.Location = new Point(12, 12);
         formatTable.Name = "formatTable";
-        formatTable.RowCount = 5;
-        for (var i = 0; i < 4; i++)
+        formatTable.RowCount = 7;
+        for (var i = 0; i < 6; i++)
             formatTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
         formatTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         formatTable.Size = new Size(572, 292);
@@ -490,6 +501,38 @@ partial class SettingsForm
         _imageCountNumeric.TabIndex = 3;
         _imageCountNumeric.Value = new decimal(new int[] { 1, 0, 0, 0 });
 
+        lblConcurrent.Location = new Point(3, 176);
+        lblConcurrent.Name = "lblConcurrent";
+        lblConcurrent.Size = new Size(114, 44);
+        lblConcurrent.Text = "并发模式";
+        lblConcurrent.TextAlign = ContentAlignment.MiddleLeft;
+
+        _concurrentCheck.Anchor = AnchorStyles.Left;
+        _concurrentCheck.AutoSize = true;
+        _concurrentCheck.Location = new Point(120, 187);
+        _concurrentCheck.Margin = new Padding(0, 7, 8, 7);
+        _concurrentCheck.Name = "_concurrentCheck";
+        _concurrentCheck.Size = new Size(53, 21);
+        _concurrentCheck.TabIndex = 4;
+        _concurrentCheck.Text = "true";
+        _concurrentCheck.UseVisualStyleBackColor = true;
+
+        lblConcurrency.Location = new Point(3, 220);
+        lblConcurrency.Name = "lblConcurrency";
+        lblConcurrency.Size = new Size(114, 44);
+        lblConcurrency.Text = "同时生成图片数";
+        lblConcurrency.TextAlign = ContentAlignment.MiddleLeft;
+
+        _concurrencyNumeric.Anchor = AnchorStyles.Left;
+        _concurrencyNumeric.Location = new Point(120, 230);
+        _concurrencyNumeric.Margin = new Padding(0, 7, 8, 7);
+        _concurrencyNumeric.Maximum = new decimal(new int[] { 10, 0, 0, 0 });
+        _concurrencyNumeric.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
+        _concurrencyNumeric.Name = "_concurrencyNumeric";
+        _concurrencyNumeric.Size = new Size(96, 24);
+        _concurrencyNumeric.TabIndex = 5;
+        _concurrencyNumeric.Value = new decimal(new int[] { 4, 0, 0, 0 });
+
         buttonPanel.Controls.Add(saveBtn);
         buttonPanel.Controls.Add(cancelBtn);
         buttonPanel.Dock = DockStyle.Bottom;
@@ -554,6 +597,7 @@ partial class SettingsForm
         formatTable.ResumeLayout(false);
         formatTable.PerformLayout();
         ((System.ComponentModel.ISupportInitialize)_imageCountNumeric).EndInit();
+        ((System.ComponentModel.ISupportInitialize)_concurrencyNumeric).EndInit();
         buttonPanel.ResumeLayout(false);
         ResumeLayout(false);
     }
@@ -571,4 +615,6 @@ partial class SettingsForm
     private Label lblTransparent;
     private Label lblModeration;
     private Label lblImageCount;
+    private Label lblConcurrent;
+    private Label lblConcurrency;
 }

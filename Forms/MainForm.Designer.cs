@@ -164,7 +164,7 @@ partial class MainForm
         //  chatContainer
         // ═══════════════════════════════════════════════════
         this.chatContainer.Dock = DockStyle.Fill;
-        this.chatContainer.AutoScroll = true;
+        this.chatContainer.AutoScroll = false;
         this.chatContainer.Padding = new Padding(12);
 
         //  _chatPanel
