@@ -477,13 +477,18 @@ internal partial class MainForm : Form
         _promptBox.Clear();
         ClearAttachedThumbnails();
         var enhancedPrompt = prompt;
+        ContextDecision? contextDecision = null;
 
         try
         {
             if (_conversationManager?.ActiveConversation != null && _promptEnhancer != null)
             {
-                var enhanceResult = _promptEnhancer.Enhance(prompt, _conversationManager.ActiveConversation);
+                var enhanceResult = _promptEnhancer.Enhance(
+                    prompt,
+                    _conversationManager.ActiveConversation,
+                    attachedCopy);
                 enhancedPrompt = enhanceResult.EnhancedPrompt;
+                contextDecision = enhanceResult.Decision;
                 foreach (var imagePath in enhanceResult.AutoAttachedImagePaths)
                 {
                     if (!attachedCopy.Contains(imagePath, StringComparer.OrdinalIgnoreCase))
@@ -500,8 +505,11 @@ internal partial class MainForm : Form
             }
 
             AddChatBubble(userMsg);
-            AddPendingResponseBubble("正在请求 API...");
-            ShowLoading(true, "正在请求 API...");
+            var initialStatus = BuildInitialGenerationStatus(
+                contextDecision,
+                _conversationManager?.ActiveConversation);
+            AddPendingResponseBubble(initialStatus);
+            ShowLoading(true, initialStatus);
 
             if (_apiService == null)
                 _apiService = new ImageApiService(_config);
@@ -642,7 +650,8 @@ internal partial class MainForm : Form
 
     private async Task InitializeConversationsAsync()
     {
-        _promptEnhancer = new PromptEnhancer(new ReferenceDetector());
+        _promptEnhancer = new PromptEnhancer(
+            new ContextDecisionService(new TextSimilarityService()));
         _conversationManager = new ConversationManager(
             new ConversationStore(_configManager.ResolveConversationStoreDir(_config)),
             new ContextCache(),
@@ -654,6 +663,27 @@ internal partial class MainForm : Form
         RebuildConversationTabs();
         LoadActiveConversationMessages();
         UpdateTitleBarText();
+    }
+
+    private static string BuildInitialGenerationStatus(ContextDecision? decision)
+    {
+        if (decision == null
+            || (!decision.ShouldInjectTextContext && !decision.ShouldAttachRecentImages))
+        {
+            return "正在请求 API...";
+        }
+
+        return string.IsNullOrWhiteSpace(decision.DecisionReason)
+            ? "已整理上下文，正在请求 API..."
+            : $"{decision.DecisionReason} 正在请求 API...";
+    }
+
+    private string BuildInitialGenerationStatus(ContextDecision? decision, Conversation? conversation)
+    {
+        if (conversation?.ContextConfig.ShowContextDecisionHint != true)
+            return "正在请求 API...";
+
+        return BuildInitialGenerationStatus(decision);
     }
 
     private void LoadActiveConversationMessages()

@@ -33,22 +33,6 @@ internal class Conversation
         return recent;
     }
 
-    public string? GetLastGeneratedImagePath()
-    {
-        for (var i = Messages.Count - 1; i >= 0; i--)
-        {
-            var message = Messages[i];
-            if (message.Role == ChatRole.Assistant
-                && !string.IsNullOrWhiteSpace(message.GeneratedImagePath)
-                && File.Exists(message.GeneratedImagePath))
-            {
-                return message.GeneratedImagePath;
-            }
-        }
-
-        return null;
-    }
-
     public List<string> GetRecentUserPrompts(int count) =>
         Messages
             .Where(message => message.Role == ChatRole.User && !string.IsNullOrWhiteSpace(message.Prompt))

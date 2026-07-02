@@ -6,62 +6,57 @@ internal sealed class PromptEnhanceResult
 {
     public string EnhancedPrompt { get; init; } = "";
     public List<string> AutoAttachedImagePaths { get; init; } = [];
-    public ReferenceStrength ReferenceStrength { get; init; }
+    public ContextDecision? Decision { get; init; }
 }
 
 internal class PromptEnhancer
 {
-    private readonly ReferenceDetector _referenceDetector;
+    private readonly ContextDecisionService _decisionService;
 
-    public PromptEnhancer(ReferenceDetector referenceDetector)
+    public PromptEnhancer(ContextDecisionService decisionService)
     {
-        _referenceDetector = referenceDetector;
+        _decisionService = decisionService;
     }
 
-    public PromptEnhanceResult Enhance(string prompt, Conversation conversation)
+    public PromptEnhanceResult Enhance(
+        string prompt,
+        Conversation conversation,
+        IReadOnlyList<string> manuallyAttachedImagePaths)
     {
-        var config = conversation.ContextConfig;
-        var detection = config.EnableReferenceDetection
-            ? _referenceDetector.Detect(prompt)
-            : new ReferenceDetectionResult { Strength = ReferenceStrength.None };
-
-        var autoImages = new List<string>();
-        if (detection.HasReference)
-        {
-            var lastImage = conversation.GetLastGeneratedImagePath();
-            if (!string.IsNullOrWhiteSpace(lastImage))
-                autoImages.Add(lastImage);
-        }
+        var decision = _decisionService.Decide(prompt, conversation, manuallyAttachedImagePaths);
+        var autoImages = decision.SelectedImagePaths
+            .Where(path => !manuallyAttachedImagePaths.Contains(path, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         var enhancedPrompt = prompt;
-        if (config.EnablePromptEnhancement && detection.HasReference)
+        if (decision.ShouldAttachRecentImages)
+            enhancedPrompt = BuildImageReferencePrompt(enhancedPrompt);
+
+        if (decision.ShouldInjectTextContext && decision.SelectedTextContext.Count > 0)
         {
-            var contextPrefix = BuildContextPrefix(conversation);
+            var contextPrefix = BuildContextPrefix(decision.SelectedTextContext);
             if (!string.IsNullOrWhiteSpace(contextPrefix))
-                enhancedPrompt = $"{contextPrefix}{Environment.NewLine}{prompt}";
+                enhancedPrompt = $"{contextPrefix}{Environment.NewLine}{enhancedPrompt}";
         }
 
         return new PromptEnhanceResult
         {
             EnhancedPrompt = enhancedPrompt,
             AutoAttachedImagePaths = autoImages,
-            ReferenceStrength = detection.Strength,
+            Decision = decision,
         };
     }
 
-    private static string BuildContextPrefix(Conversation conversation)
-    {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(conversation.CompressedSummary))
-            parts.Add($"上文摘要：{conversation.CompressedSummary}");
+    private static string BuildImageReferencePrompt(string prompt) =>
+        "请把随请求附带的参考图作为当前编辑基础。保留用户未要求改变的主体、构图、身份一致性和关键细节。"
+        + Environment.NewLine
+        + prompt;
 
-        var prompts = conversation.GetRecentUserPrompts(conversation.ContextConfig.MaxContextPrompts);
-        if (prompts.Count > 0)
-            parts.Add("最近的用户提示词：" + string.Join(" | ", prompts));
-
-        if (parts.Count == 0)
-            return "";
-
-        return $"请仅将以下本地会话上下文用于保持连续性。{string.Join(" ", parts)}";
-    }
+    private static string BuildContextPrefix(IReadOnlyList<string> contextParts) =>
+        "请基于以下本地会话上下文理解用户意图；如果当前用户提示词已经足够完整，请优先遵循当前提示词。"
+        + Environment.NewLine
+        + string.Join(Environment.NewLine, contextParts)
+        + Environment.NewLine
+        + "当前用户请求：";
 }
