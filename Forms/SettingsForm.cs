@@ -16,12 +16,22 @@ internal partial class SettingsForm : Form
     private bool _restoreLayoutQueued;
     private readonly Dictionary<(int SizeHundredths, FontStyle Style), Font> _fontCache = [];
     private int _savedImageCount;
+    private TabPage _contextTab = null!;
+    private TableLayoutPanel _contextTable = null!;
+    private TextBox _conversationDirBox = null!;
+    private Button _conversationBrowseBtn = null!;
+    private NumericUpDown _maxActiveMessagesNumeric = null!;
+    private NumericUpDown _compressionTriggerNumeric = null!;
+    private NumericUpDown _keepRecentNumeric = null!;
+    private CheckBox _referenceDetectionCheck = null!;
+    private CheckBox _promptEnhancementCheck = null!;
 
     public AppConfig Result { get; private set; }
 
     public SettingsForm(AppConfig currentConfig)
     {
         InitializeComponent();
+        BuildContextTab();
 
         Result = currentConfig;
 
@@ -46,9 +56,16 @@ internal partial class SettingsForm : Form
         _imageCountNumeric.Value = Clamp(currentConfig.ImageCount, _imageCountNumeric.Minimum, _imageCountNumeric.Maximum);
         _concurrentCheck.Checked = currentConfig.UseConcurrentStrategy;
         _concurrencyNumeric.Value = Clamp(currentConfig.MaxConcurrency, _concurrencyNumeric.Minimum, _concurrencyNumeric.Maximum);
+        _conversationDirBox.Text = currentConfig.ConversationStoreDir;
+        _maxActiveMessagesNumeric.Value = Clamp(currentConfig.MaxActiveMessages, _maxActiveMessagesNumeric.Minimum, _maxActiveMessagesNumeric.Maximum);
+        _compressionTriggerNumeric.Value = Clamp(currentConfig.CompressionTriggerCount, _compressionTriggerNumeric.Minimum, _compressionTriggerNumeric.Maximum);
+        _keepRecentNumeric.Value = Clamp(currentConfig.KeepRecentCount, _keepRecentNumeric.Minimum, _keepRecentNumeric.Maximum);
+        _referenceDetectionCheck.Checked = currentConfig.EnableReferenceDetection;
+        _promptEnhancementCheck.Checked = currentConfig.EnablePromptEnhancement;
 
         showKeyBtn.Click += ShowKeyBtn_Click;
         browseBtn.Click += BrowseBtn_Click;
+        _conversationBrowseBtn.Click += ConversationBrowseBtn_Click;
         saveBtn.Click += SaveBtn_Click;
         cancelBtn.Click += CancelBtn_Click;
         _sizeAutoRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
@@ -66,6 +83,97 @@ internal partial class SettingsForm : Form
         };
         UpdateSizeControlStates();
         UpdateConcurrencyControlStates();
+    }
+
+    private void BuildContextTab()
+    {
+        _contextTab = new TabPage
+        {
+            Text = "上下文",
+            Padding = new Padding(12),
+            UseVisualStyleBackColor = true,
+        };
+
+        _contextTable = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 8,
+        };
+        _contextTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150F));
+        _contextTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _contextTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86F));
+        for (var i = 0; i < 6; i++)
+            _contextTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
+        _contextTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 64F));
+        _contextTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        _conversationDirBox = new TextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
+        _conversationBrowseBtn = new Button
+        {
+            Text = "浏览...",
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
+            Size = new Size(86, 28),
+        };
+        ApplyBrowseButtonStyle(_conversationBrowseBtn);
+        _maxActiveMessagesNumeric = CreateContextNumeric(5, 100, 20);
+        _compressionTriggerNumeric = CreateContextNumeric(10, 200, 30);
+        _keepRecentNumeric = CreateContextNumeric(3, 50, 10);
+        _referenceDetectionCheck = new CheckBox { Text = "启用", Anchor = AnchorStyles.Left, AutoSize = true };
+        _promptEnhancementCheck = new CheckBox { Text = "启用", Anchor = AnchorStyles.Left, AutoSize = true };
+
+        AddContextRow(_contextTable, "会话存储目录", _conversationDirBox, 0);
+        _contextTable.Controls.Add(_conversationBrowseBtn, 2, 0);
+        AddContextRow(_contextTable, "活跃消息数", _maxActiveMessagesNumeric, 1);
+        AddContextRow(_contextTable, "压缩触发阈值", _compressionTriggerNumeric, 2);
+        AddContextRow(_contextTable, "保留最近消息", _keepRecentNumeric, 3);
+        AddContextRow(_contextTable, "自动引用图片", _referenceDetectionCheck, 4);
+        AddContextRow(_contextTable, "提示词上下文", _promptEnhancementCheck, 5);
+
+        var helpLabel = new Label
+        {
+            Text = "自动引用会在“把上一张调亮一点”这类连续修改提示中，自动附加上一张生成图作为参考图。",
+            Dock = DockStyle.Fill,
+            ForeColor = SystemColors.GrayText,
+            TextAlign = ContentAlignment.MiddleLeft,
+        };
+        _contextTable.SetColumnSpan(helpLabel, 3);
+        _contextTable.Controls.Add(helpLabel, 0, 6);
+
+        _contextTab.Controls.Add(_contextTable);
+        tabs.Controls.Add(_contextTab);
+    }
+
+    private static NumericUpDown CreateContextNumeric(int min, int max, int value) => new()
+    {
+        Minimum = min,
+        Maximum = max,
+        Value = value,
+        Size = new Size(96, 24),
+        Anchor = AnchorStyles.Left,
+    };
+
+    private static void AddContextRow(TableLayoutPanel table, string labelText, Control control, int row)
+    {
+        var label = new Label
+        {
+            Text = labelText,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+        };
+        table.Controls.Add(label, 0, row);
+        table.Controls.Add(control, 1, row);
+    }
+
+    private void ApplyBrowseButtonStyle(Button button)
+    {
+        button.FlatStyle = browseBtn.FlatStyle;
+        button.BackColor = browseBtn.BackColor;
+        button.ForeColor = browseBtn.ForeColor;
+        button.Font = browseBtn.Font;
+        button.TextAlign = browseBtn.TextAlign;
+        button.UseVisualStyleBackColor = browseBtn.UseVisualStyleBackColor;
+        button.FlatAppearance.BorderSize = browseBtn.FlatAppearance.BorderSize;
     }
 
     private void FitInitialWindowToScreen()
@@ -137,26 +245,34 @@ internal partial class SettingsForm : Form
             basicTable.SuspendLayout();
             sizeTable.SuspendLayout();
             formatTable.SuspendLayout();
+            _contextTable.SuspendLayout();
             buttonPanel.SuspendLayout();
 
             Padding = new Padding(padding);
             basicTab.Padding = new Padding(tabPadding);
             sizeTab.Padding = new Padding(tabPadding);
             formatTab.Padding = new Padding(tabPadding);
+            _contextTab.Padding = new Padding(tabPadding);
 
             SetColumnWidth(basicTable, 0, compact ? 92 : 110);
             SetColumnWidth(basicTable, 2, compact ? 68 : 86);
+            SetColumnWidth(_contextTable, 0, compact ? 112 : 150);
+            SetColumnWidth(_contextTable, 2, compact ? 68 : 86);
             SetColumnWidth(sizeTable, 0, compact ? 92 : 110);
             SetColumnWidth(sizeTable, 2, compact ? 88 : 110);
             SetColumnWidth(formatTable, 0, compact ? 98 : 120);
 
             SetAbsoluteRows(basicTable, 5, rowHeight);
+            SetAbsoluteRows(_contextTable, 6, compact ? ScaleValue(38) : rowHeight);
+            _contextTable.RowStyles[6].SizeType = SizeType.Absolute;
+            _contextTable.RowStyles[6].Height = ScaleValue(compact ? 72 : 64);
             SetAbsoluteRows(sizeTable, 6, ScaleValue(compact ? 36 : 40));
             SetAbsoluteRows(formatTable, 6, rowHeight);
             formatTable.RowStyles[6].SizeType = SizeType.Absolute;
             formatTable.RowStyles[6].Height = ScaleValue(compact ? 76 : 72);
 
             ApplyTableControlSpacing(basicTable, rowHeight, compact);
+            ApplyTableControlSpacing(_contextTable, compact ? ScaleValue(38) : rowHeight, compact);
             ApplyTableControlSpacing(sizeTable, ScaleValue(compact ? 36 : 40), compact);
             ApplyTableControlSpacing(formatTable, rowHeight, compact);
 
@@ -169,18 +285,21 @@ internal partial class SettingsForm : Form
             saveBtn.Font = UiFont(compact ? 9F : 10F);
             cancelBtn.Font = UiFont(compact ? 9F : 10F);
             browseBtn.Font = UiFont(compact ? 9F : 10F);
+            _conversationBrowseBtn.Font = UiFont(compact ? 9F : 10F);
             showKeyBtn.Size = new Size(showKeyBtn.Width, ScaleValue(compact ? 28 : 30));
             UpdateShowKeyIcon();
 
             var buttonRadius = ScaleValue(8);
             UpdateButtonRegion(showKeyBtn, buttonRadius);
             UpdateButtonRegion(browseBtn, buttonRadius);
+            UpdateButtonRegion(_conversationBrowseBtn, buttonRadius);
             UpdateButtonRegion(saveBtn, buttonRadius);
             UpdateButtonRegion(cancelBtn, buttonRadius);
         }
         finally
         {
             buttonPanel.ResumeLayout(true);
+            _contextTable.ResumeLayout(true);
             formatTable.ResumeLayout(true);
             sizeTable.ResumeLayout(true);
             basicTable.ResumeLayout(true);
@@ -259,7 +378,12 @@ internal partial class SettingsForm : Form
             }
 
             control.Font = UiFont(compact ? 9F : 10F);
-            control.Margin = new Padding(0, verticalMargin, rightMargin, verticalMargin);
+            if (control is Button button)
+                button.TextAlign = ContentAlignment.MiddleCenter;
+
+            var column = table.GetColumn(control);
+            var trailingMargin = column == table.ColumnCount - 1 ? 0 : rightMargin;
+            control.Margin = new Padding(0, verticalMargin, trailingMargin, verticalMargin);
         }
     }
 
@@ -318,6 +442,7 @@ internal partial class SettingsForm : Form
     {
         ApplyRoundedButtonStyle(showKeyBtn, 8);
         ApplyRoundedButtonStyle(browseBtn, 8);
+        ApplyRoundedButtonStyle(_conversationBrowseBtn, 8);
         ApplyRoundedButtonStyle(saveBtn, 8);
         ApplyRoundedButtonStyle(cancelBtn, 8);
     }
@@ -420,6 +545,15 @@ internal partial class SettingsForm : Form
             _outputDirBox.Text = dlg.SelectedPath;
     }
 
+    private void ConversationBrowseBtn_Click(object? sender, EventArgs e)
+    {
+        using var dlg = new FolderBrowserDialog();
+        if (!string.IsNullOrWhiteSpace(_conversationDirBox.Text) && Directory.Exists(_conversationDirBox.Text))
+            dlg.SelectedPath = _conversationDirBox.Text;
+        if (dlg.ShowDialog(this) == DialogResult.OK)
+            _conversationDirBox.Text = dlg.SelectedPath;
+    }
+
     private void CancelBtn_Click(object? sender, EventArgs e)
     {
         DialogResult = DialogResult.Cancel;
@@ -446,6 +580,15 @@ internal partial class SettingsForm : Form
             ImageCount = (int)_imageCountNumeric.Value,
             UseConcurrentStrategy = _concurrentCheck.Checked,
             MaxConcurrency = (int)_concurrencyNumeric.Value,
+            ConversationStoreDir = string.IsNullOrWhiteSpace(_conversationDirBox.Text)
+                ? "conversations"
+                : _conversationDirBox.Text.Trim(),
+            LastConversationId = Result.LastConversationId,
+            MaxActiveMessages = (int)_maxActiveMessagesNumeric.Value,
+            CompressionTriggerCount = (int)_compressionTriggerNumeric.Value,
+            KeepRecentCount = (int)_keepRecentNumeric.Value,
+            EnableReferenceDetection = _referenceDetectionCheck.Checked,
+            EnablePromptEnhancement = _promptEnhancementCheck.Checked,
         };
 
         if (string.IsNullOrWhiteSpace(Result.BaseUrl))

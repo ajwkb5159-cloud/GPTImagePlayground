@@ -15,6 +15,9 @@ partial class MainForm
     private Label titleLabel;
     private Button settingsBtn;
     private Panel separator;
+    private Panel conversationBar;
+    private Button newConversationBtn;
+    private FlowLayoutPanel conversationTabs;
 
     // ── Chat area ──
     private Panel chatContainer;
@@ -71,6 +74,9 @@ partial class MainForm
         this.titleLabel = new Label();
         this.settingsBtn = new Button();
         this.separator = new Panel();
+        this.conversationBar = new Panel();
+        this.newConversationBtn = new Button();
+        this.conversationTabs = new FlowLayoutPanel();
         this.chatContainer = new Panel();
         this._chatPanel = new Panel();
         this._loadingOverlay = new Panel();
@@ -89,6 +95,7 @@ partial class MainForm
         // ═══════════════════════════════════════════════════
         this.SuspendLayout();
         this.topBar.SuspendLayout();
+        this.conversationBar.SuspendLayout();
         ((System.ComponentModel.ISupportInitialize)(this.titleIcon)).BeginInit();
         this.titlePanel.SuspendLayout();
         this.inputPanel.SuspendLayout();
@@ -152,6 +159,30 @@ partial class MainForm
         this.titlePanel.Controls.Add(this.titleIcon);
         this.topBar.Controls.Add(this.titlePanel);
         this.topBar.Controls.Add(this.settingsBtn);
+
+        //  conversationBar
+        this.conversationBar.Dock = DockStyle.Top;
+        this.conversationBar.Height = 42;
+        this.conversationBar.BackColor = Color.White;
+        this.conversationBar.Padding = new Padding(12, 5, 12, 5);
+
+        this.newConversationBtn.Dock = DockStyle.Left;
+        this.newConversationBtn.FlatStyle = FlatStyle.Flat;
+        this.newConversationBtn.FlatAppearance.BorderSize = 0;
+        this.newConversationBtn.BackColor = Color.FromArgb(59, 130, 246);
+        this.newConversationBtn.ForeColor = Color.White;
+        this.newConversationBtn.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+        this.newConversationBtn.Size = new Size(92, 30);
+        this.newConversationBtn.Text = "+ 新建";
+
+        this.conversationTabs.Dock = DockStyle.Fill;
+        this.conversationTabs.FlowDirection = FlowDirection.LeftToRight;
+        this.conversationTabs.WrapContents = false;
+        this.conversationTabs.AutoScroll = true;
+        this.conversationTabs.Padding = new Padding(8, 0, 0, 0);
+
+        this.conversationBar.Controls.Add(this.conversationTabs);
+        this.conversationBar.Controls.Add(this.newConversationBtn);
 
         // ═══════════════════════════════════════════════════
         //  separator
@@ -256,6 +287,7 @@ partial class MainForm
         this._promptBox.ScrollBars = ScrollBars.Vertical;
         this._promptBox.BackColor = Color.FromArgb(248, 250, 252);
         this._promptBox.Margin = new Padding(0);
+        this._promptBox.ImeMode = ImeMode.NoControl;
 
         // ── input card layout: thumbnails → prompt → actions ──
         this.promptHost.Controls.Add(this._promptBox);
@@ -263,9 +295,9 @@ partial class MainForm
         this.actionBar.Controls.Add(this._attachBtn);
         this.inputCard.Controls.Add(this.promptHost);
         this.inputCard.Controls.Add(this.actionBar);
-        this.inputCard.Controls.Add(this._thumbnailStrip);
 
         this.inputPanel.Controls.Add(this.inputCard);
+        this.inputPanel.Controls.Add(this._thumbnailStrip);
 
         // ═══════════════════════════════════════════════════
         //  Assemble main form (bottom → top docking order)
@@ -273,6 +305,7 @@ partial class MainForm
         this.Controls.Add(this.chatContainer);
         this.Controls.Add(this._loadingOverlay);
         this.Controls.Add(this.separator);
+        this.Controls.Add(this.conversationBar);
         this.Controls.Add(this.topBar);
         this.Controls.Add(this.inputPanel);
 
@@ -284,6 +317,7 @@ partial class MainForm
         this.titlePanel.ResumeLayout(false);
         ((System.ComponentModel.ISupportInitialize)(this.titleIcon)).EndInit();
         this.topBar.ResumeLayout(false);
+        this.conversationBar.ResumeLayout(false);
         this.ResumeLayout(false);
         this.PerformLayout();
     }

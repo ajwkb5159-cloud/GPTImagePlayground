@@ -22,6 +22,8 @@ internal partial class MainForm : Form
     private readonly ConfigManager _configManager;
     private AppConfig _config;
     private ImageApiService? _apiService;
+    private ConversationManager? _conversationManager;
+    private PromptEnhancer? _promptEnhancer;
 
     // State
     private readonly List<string> _attachedImages = [];
@@ -51,6 +53,7 @@ internal partial class MainForm : Form
 
         // ── Event wiring ──
         settingsBtn.Click += SettingsBtn_Click;
+        newConversationBtn.Click += NewConversationBtn_Click;
         _attachBtn.Click += AttachBtn_Click;
         _sendBtn.Click += SendBtn_Click;
         _promptBox.KeyDown += PromptBox_KeyDown;
@@ -81,7 +84,7 @@ internal partial class MainForm : Form
         };
 
         // ── Post-handle initialization ──
-        Load += (_, _) =>
+        Load += async (_, _) =>
         {
             FitInitialWindowToScreen();
             ApplyResponsiveLayout();
@@ -92,7 +95,7 @@ internal partial class MainForm : Form
 
             UpdateChatPanelBounds();
 
-            AddWelcomeMessage();
+            await InitializeConversationsAsync();
         };
     }
 
@@ -177,6 +180,7 @@ internal partial class MainForm : Form
 
             SuspendLayout();
             topBar.SuspendLayout();
+            conversationBar.SuspendLayout();
             inputPanel.SuspendLayout();
             inputCard.SuspendLayout();
             actionBar.SuspendLayout();
@@ -184,6 +188,11 @@ internal partial class MainForm : Form
 
             topBar.Height = ScaleValue(compact ? 42 : 48);
             topBar.Padding = new Padding(ScaleValue(compact ? 10 : 16), 0, ScaleValue(8), 0);
+            conversationBar.Height = ScaleValue(compact ? 38 : 42);
+            conversationBar.Padding = new Padding(ScaleValue(compact ? 8 : 12), ScaleValue(5), ScaleValue(compact ? 8 : 12), ScaleValue(5));
+            newConversationBtn.Size = new Size(ScaleValue(compact ? 76 : 92), ScaleValue(compact ? 28 : 30));
+            newConversationBtn.Font = UiFont(compact ? 8.5F : 9F, FontStyle.Bold);
+            conversationTabs.Padding = new Padding(ScaleValue(8), 0, 0, 0);
 
             settingsBtn.Text = compact ? "" : " " + "\u8bbe\u7f6e";
             settingsBtn.Font = UiFont(compact ? 9F : 10F, FontStyle.Bold);
@@ -205,14 +214,13 @@ internal partial class MainForm : Form
             chatContainer.Padding = new Padding(ScaleValue(compact ? 8 : 12));
             _loadingLabel.Font = UiFont(compact ? 12F : 14F, FontStyle.Bold);
 
-            var inputHeight = (int)Math.Round(ClientSize.Height * (compact ? 0.28F : 0.26F));
-            inputPanel.Height = Clamp(inputHeight, ScaleValue(compact ? 124 : 142), ScaleValue(176));
             inputPanel.Padding = compact
                 ? new Padding(ScaleValue(10), ScaleValue(6), ScaleValue(10), ScaleValue(10))
                 : new Padding(ScaleValue(18), ScaleValue(8), ScaleValue(18), ScaleValue(16));
 
             inputCard.Padding = new Padding(ScaleValue(compact ? 9 : 12));
             _thumbnailStrip.Height = ScaleValue(compact ? 42 : 50);
+            UpdateInputPanelHeight();
             promptHost.Padding = compact
                 ? new Padding(ScaleValue(9), ScaleValue(6), ScaleValue(9), ScaleValue(6))
                 : new Padding(ScaleValue(12), ScaleValue(8), ScaleValue(12), ScaleValue(8));
@@ -243,10 +251,24 @@ internal partial class MainForm : Form
             actionBar.ResumeLayout(true);
             inputCard.ResumeLayout(true);
             inputPanel.ResumeLayout(true);
+            conversationBar.ResumeLayout(true);
             topBar.ResumeLayout(true);
             ResumeLayout(true);
             _isApplyingResponsiveLayout = false;
         }
+    }
+
+    private void UpdateInputPanelHeight()
+    {
+        var logicalClientSize = GetLogicalClientSize();
+        var compact = logicalClientSize.Width < 560 || logicalClientSize.Height < 520;
+        var inputHeight = (int)Math.Round(ClientSize.Height * (compact ? 0.28F : 0.26F));
+        var baseHeight = Clamp(inputHeight, ScaleValue(compact ? 124 : 142), ScaleValue(176));
+
+        if (_thumbnailStrip.Visible)
+            baseHeight += _thumbnailStrip.Height;
+
+        inputPanel.Height = baseHeight;
     }
 
     private float CalculateUiScale()
@@ -374,6 +396,7 @@ internal partial class MainForm : Form
             _config = dlg.Result;
             _apiService = new ImageApiService(_config);
             _configManager.Save(_config);
+            _ = InitializeConversationsAsync();
             _promptBox.Focus();
         }
     }
@@ -384,6 +407,16 @@ internal partial class MainForm : Form
         {
             e.SuppressKeyPress = true;
             TriggerSend();
+            return;
+        }
+
+        if (e.KeyCode == Keys.Back
+            && string.IsNullOrEmpty(_promptBox.Text)
+            && _thumbnailStrip.Controls.Count > 0)
+        {
+            e.SuppressKeyPress = true;
+            RemoveLastThumbnail();
+            _promptBox.Focus();
         }
     }
 
@@ -413,6 +446,20 @@ internal partial class MainForm : Form
         TriggerSend();
     }
 
+    private async void NewConversationBtn_Click(object? sender, EventArgs e)
+    {
+        if (_conversationManager == null || _isGenerating)
+            return;
+
+        await _conversationManager.SaveActiveConversationAsync();
+        await _conversationManager.CreateConversationAsync();
+        _configManager.Save(_config);
+        RebuildConversationTabs();
+        LoadActiveConversationMessages();
+        UpdateTitleBarText();
+        _promptBox.Focus();
+    }
+
     // ═══════════════════════════════════════════════════
     //  Core Logic
     // ═══════════════════════════════════════════════════
@@ -428,14 +475,30 @@ internal partial class MainForm : Form
 
         var attachedCopy = new List<string>(_attachedImages);
         _promptBox.Clear();
-        _attachedImages.Clear();
-        _thumbnailStrip.Controls.Clear();
-        _thumbnailStrip.Visible = false;
+        ClearAttachedThumbnails();
+        var enhancedPrompt = prompt;
 
         try
         {
-            // Show the user's turn immediately, then keep a live assistant placeholder.
+            if (_conversationManager?.ActiveConversation != null && _promptEnhancer != null)
+            {
+                var enhanceResult = _promptEnhancer.Enhance(prompt, _conversationManager.ActiveConversation);
+                enhancedPrompt = enhanceResult.EnhancedPrompt;
+                foreach (var imagePath in enhanceResult.AutoAttachedImagePaths)
+                {
+                    if (!attachedCopy.Contains(imagePath, StringComparer.OrdinalIgnoreCase))
+                        attachedCopy.Add(imagePath);
+                }
+            }
+
             var userMsg = ChatMessage.UserMessage(prompt, [.. attachedCopy]);
+            if (_conversationManager != null)
+            {
+                await _conversationManager.AddMessageToActiveConversationAsync(userMsg);
+                RebuildConversationTabs();
+                UpdateTitleBarText();
+            }
+
             AddChatBubble(userMsg);
             AddPendingResponseBubble("正在请求 API...");
             ShowLoading(true, "正在请求 API...");
@@ -461,25 +524,35 @@ internal partial class MainForm : Form
             _generationCts = cts;
 
             var result = await Task.Run(() =>
-                _apiService.GenerateAsync(prompt, attachedCopy, progress, cts.Token));
+                _apiService.GenerateAsync(enhancedPrompt, attachedCopy, progress, cts.Token));
 
             if (_isClosing || IsDisposed)
                 return;
 
-            // Create assistant message for each generated image
             for (int i = 0; i < result.SavedPaths.Count; i++)
             {
                 var imgPath = result.SavedPaths[i];
                 var dataUrl = i < result.DataUrls.Count ? result.DataUrls[i] : null;
                 var usage = i == 0 ? result.Usage : null;
                 var assistantMsg = ChatMessage.AssistantMessage(prompt, imgPath, dataUrl, usage);
+                if (_conversationManager != null)
+                {
+                    assistantMsg.GeneratedImageDataUrl = null;
+                    await _conversationManager.AddMessageToActiveConversationAsync(assistantMsg);
+                    assistantMsg.GeneratedImageDataUrl = dataUrl;
+                }
+
                 if (i == 0)
                     CompletePendingResponseWithMessage(assistantMsg);
                 else
                     AddChatBubble(assistantMsg);
             }
 
-            AddSystemMessage(BuildCompletionMessage(result));
+            var completionMsg = ChatMessage.SystemMessage(BuildCompletionMessage(result));
+            if (_conversationManager != null)
+                await _conversationManager.AddMessageToActiveConversationAsync(completionMsg);
+            AddChatBubble(completionMsg);
+            RebuildConversationTabs();
         }
         catch (Exception ex)
         {
@@ -489,12 +562,12 @@ internal partial class MainForm : Form
             var errorMsg = ex switch
             {
                 TaskCanceledException => "请求超时，请检查超时设置或降低图片尺寸后重试。",
-                HttpRequestException httpEx => $"API 请求失败: {httpEx.Message}",
-                DirectoryNotFoundException dirEx => $"输出目录不存在或无法访问: {dirEx.Message}",
-                UnauthorizedAccessException accessEx => $"没有文件访问权限，请检查输出目录或图片文件权限: {accessEx.Message}",
-                IOException ioEx => $"文件读写失败，请检查磁盘空间、输出目录或图片文件是否可用: {ioEx.Message}",
+                HttpRequestException httpEx => $"API 请求失败：{httpEx.Message}",
+                DirectoryNotFoundException dirEx => $"输出目录不存在或无法访问：{dirEx.Message}",
+                UnauthorizedAccessException accessEx => $"没有文件访问权限，请检查输出目录或图片文件权限：{accessEx.Message}",
+                IOException ioEx => $"文件读写失败，请检查磁盘空间、输出目录或图片文件是否可用：{ioEx.Message}",
                 InvalidOperationException opEx => opEx.Message,
-                _ => $"未知错误: {ex.Message}",
+                _ => $"未知错误：{ex.Message}",
             };
             CompletePendingResponseWithError(errorMsg);
         }
@@ -511,7 +584,6 @@ internal partial class MainForm : Form
         }
     }
 
-    // ═══════════════════════════════════════════════════
     //  UI Builders
     // ═══════════════════════════════════════════════════
 
@@ -566,6 +638,212 @@ internal partial class MainForm : Form
     private void AddSystemMessage(string text)
     {
         AddChatBubble(ChatMessage.SystemMessage(text));
+    }
+
+    private async Task InitializeConversationsAsync()
+    {
+        _promptEnhancer = new PromptEnhancer(new ReferenceDetector());
+        _conversationManager = new ConversationManager(
+            new ConversationStore(_configManager.ResolveConversationStoreDir(_config)),
+            new ContextCache(),
+            new ContextCompressor(),
+            _config);
+
+        await _conversationManager.InitializeAsync();
+        _configManager.Save(_config);
+        RebuildConversationTabs();
+        LoadActiveConversationMessages();
+        UpdateTitleBarText();
+    }
+
+    private void LoadActiveConversationMessages()
+    {
+        ClearChatPanel();
+        var messages = _conversationManager?.ActiveConversation?.Messages;
+        if (messages == null || messages.Count == 0)
+        {
+            AddWelcomeMessage();
+            return;
+        }
+
+        foreach (var message in messages)
+            AddChatBubble(message);
+    }
+
+    private void RebuildConversationTabs()
+    {
+        if (conversationTabs.IsDisposed)
+            return;
+
+        conversationTabs.SuspendLayout();
+        conversationTabs.Controls.Clear();
+
+        if (_conversationManager != null)
+        {
+            var displayNumbers = BuildConversationDisplayNumbers();
+            foreach (var meta in _conversationManager.ConversationList)
+                conversationTabs.Controls.Add(CreateConversationTab(meta, displayNumbers.GetValueOrDefault(meta.Id, 1)));
+        }
+
+        conversationTabs.ResumeLayout(true);
+    }
+
+    private Button CreateConversationTab(ConversationMeta meta, int displayNumber)
+    {
+        var isActive = meta.Id == _conversationManager?.ActiveConversationId;
+        var title = FormatConversationTitle(meta, displayNumber);
+        var tab = new Button
+        {
+            Text = title,
+            Tag = meta.Id,
+            Width = GetConversationTabWidth(title),
+            Height = ScaleValue(30),
+            Margin = new Padding(0, 0, ScaleValue(5), 0),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = isActive ? Color.FromArgb(219, 234, 254) : Color.FromArgb(248, 250, 252),
+            ForeColor = isActive ? Color.FromArgb(30, 64, 175) : Color.FromArgb(71, 85, 105),
+            Font = UiFont(8.5F, isActive ? FontStyle.Bold : FontStyle.Regular),
+            TextAlign = ContentAlignment.MiddleCenter,
+            AutoEllipsis = true,
+            Padding = new Padding(ScaleValue(10), 0, ScaleValue(10), 0),
+            ContextMenuStrip = CreateConversationTabMenu(meta.Id),
+        };
+        tab.FlatAppearance.BorderSize = 0;
+        tab.Click += async (_, _) => await SwitchConversationAsync(meta.Id);
+        return tab;
+    }
+
+    private ContextMenuStrip CreateConversationTabMenu(string conversationId)
+    {
+        var menu = new ContextMenuStrip();
+        var renameItem = menu.Items.Add("重命名");
+        renameItem.Click += async (_, _) => await RenameConversationAsync(conversationId);
+        var deleteItem = menu.Items.Add("删除");
+        deleteItem.Click += async (_, _) => await DeleteConversationAsync(conversationId);
+        return menu;
+    }
+
+    private async Task SwitchConversationAsync(string conversationId)
+    {
+        if (_conversationManager == null || _isGenerating)
+            return;
+
+        await _conversationManager.SwitchToConversationAsync(conversationId);
+        _configManager.Save(_config);
+        RebuildConversationTabs();
+        LoadActiveConversationMessages();
+        UpdateTitleBarText();
+    }
+
+    private async Task DeleteConversationAsync(string conversationId)
+    {
+        if (_conversationManager == null || _isGenerating)
+            return;
+
+        if (_conversationManager.ConversationList.Count <= 1)
+        {
+            MessageBox.Show(this, "至少保留一个会话。", "会话",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var result = MessageBox.Show(this, "确定要删除这个会话吗？", "会话",
+            MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+        if (result != DialogResult.Yes)
+            return;
+
+        var deletingActive = conversationId == _conversationManager.ActiveConversationId;
+        await _conversationManager.DeleteConversationAsync(conversationId);
+        if (deletingActive)
+        {
+            var next = _conversationManager.ConversationList.FirstOrDefault();
+            if (next != null)
+                await _conversationManager.SwitchToConversationAsync(next.Id);
+        }
+
+        _configManager.Save(_config);
+        RebuildConversationTabs();
+        LoadActiveConversationMessages();
+        UpdateTitleBarText();
+    }
+
+    private async Task RenameConversationAsync(string conversationId)
+    {
+        if (_conversationManager == null)
+            return;
+
+        var meta = _conversationManager.ConversationList.FirstOrDefault(item => item.Id == conversationId);
+        var title = Microsoft.VisualBasic.Interaction.InputBox(
+            "会话标题",
+            "重命名",
+            meta?.Title ?? "",
+            -1,
+            -1);
+
+        if (string.IsNullOrWhiteSpace(title))
+            return;
+
+        await _conversationManager.RenameConversationAsync(conversationId, title);
+        _configManager.Save(_config);
+        RebuildConversationTabs();
+        UpdateTitleBarText();
+    }
+
+    private Dictionary<string, int> BuildConversationDisplayNumbers()
+    {
+        if (_conversationManager == null)
+            return [];
+
+        return _conversationManager.ConversationList
+            .OrderBy(meta => meta.CreatedAt)
+            .Select((meta, index) => new { meta.Id, Number = index + 1 })
+            .ToDictionary(item => item.Id, item => item.Number);
+    }
+
+    private int GetConversationTabWidth(string title)
+    {
+        var textWidth = TextRenderer.MeasureText(title, UiFont(8.5F, FontStyle.Bold)).Width + ScaleValue(28);
+        return Clamp(textWidth, ScaleValue(76), ScaleValue(168));
+    }
+
+    private static bool IsDefaultConversationTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return true;
+
+        var normalized = title.Trim();
+        return normalized.Equals("新会话", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("New Chat", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("New Conversation", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FormatConversationTitle(ConversationMeta meta, int displayNumber)
+    {
+        var title = IsDefaultConversationTitle(meta.Title)
+            ? $"窗体{displayNumber}"
+            : meta.Title.Trim();
+        return title.Length > 18 ? title[..17] + "..." : title;
+    }
+
+    private void UpdateTitleBarText()
+    {
+        titleLabel.Text = "GPT Image Playground";
+    }
+
+    private void ClearChatPanel()
+    {
+        while (_chatPanel.Controls.Count > 0)
+        {
+            var control = _chatPanel.Controls[0];
+            _chatPanel.Controls.RemoveAt(0);
+            control.Dispose();
+        }
+
+        _pendingResponseRow = null;
+        _pendingResponseBubble = null;
+        _pendingResponseLabel = null;
+        ResizeChatPanelHeight();
+        RestoreChatScroll(0);
     }
 
     private static string BuildCompletionMessage(GenerateResult result)
@@ -1306,18 +1584,72 @@ internal partial class MainForm : Form
     {
         var thumb = CreateThumbnail(imagePath, ScaleValue(40));
         thumb.Cursor = Cursors.Hand;
+        thumb.Tag = imagePath;
         thumb.Click += (_, _) =>
         {
-            _attachedImages.Remove(imagePath);
-            _thumbnailStrip.Controls.Remove(thumb);
-            var image = thumb.Image;
-            thumb.Image = null;
-            image?.Dispose();
-            thumb.Dispose();
-            _thumbnailStrip.Visible = _thumbnailStrip.Controls.Count > 0;
+            RemoveThumbnail(thumb);
+            _promptBox.Focus();
         };
         _thumbnailStrip.Visible = true;
         _thumbnailStrip.Controls.Add(thumb);
+        UpdateInputPanelHeight();
+    }
+
+    private void RemoveLastThumbnail()
+    {
+        for (var index = _thumbnailStrip.Controls.Count - 1; index >= 0; index--)
+        {
+            if (_thumbnailStrip.Controls[index] is PictureBox thumb)
+            {
+                RemoveThumbnail(thumb);
+                return;
+            }
+        }
+    }
+
+    private void RemoveThumbnail(PictureBox thumb)
+    {
+        if (thumb.Tag is string imagePath)
+        {
+            _attachedImages.Remove(imagePath);
+        }
+        else
+        {
+            var index = _thumbnailStrip.Controls.IndexOf(thumb);
+            if (index >= 0 && index < _attachedImages.Count)
+                _attachedImages.RemoveAt(index);
+        }
+
+        _thumbnailStrip.Controls.Remove(thumb);
+        DisposeThumbnail(thumb);
+        _thumbnailStrip.Visible = _thumbnailStrip.Controls.Count > 0;
+        UpdateInputPanelHeight();
+    }
+
+    private void ClearAttachedThumbnails()
+    {
+        while (_thumbnailStrip.Controls.Count > 0)
+        {
+            var control = _thumbnailStrip.Controls[0];
+            _thumbnailStrip.Controls.RemoveAt(0);
+
+            if (control is PictureBox thumb)
+                DisposeThumbnail(thumb);
+            else
+                control.Dispose();
+        }
+
+        _attachedImages.Clear();
+        _thumbnailStrip.Visible = false;
+        UpdateInputPanelHeight();
+    }
+
+    private static void DisposeThumbnail(PictureBox thumb)
+    {
+        var image = thumb.Image;
+        thumb.Image = null;
+        image?.Dispose();
+        thumb.Dispose();
     }
 
     private PictureBox CreateThumbnail(string imagePath, int size)
@@ -1362,6 +1694,7 @@ internal partial class MainForm : Form
 
         _isClosing = true;
         _generationCts?.Cancel();
+        _conversationManager?.SaveActiveConversationAsync().GetAwaiter().GetResult();
         _configManager.Save(_config);
         base.OnFormClosing(e);
     }

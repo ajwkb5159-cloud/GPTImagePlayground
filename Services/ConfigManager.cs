@@ -20,6 +20,17 @@ internal class ConfigManager
         _configPath = Path.Combine(exeDir, "appsettings.json");
     }
 
+    public string ResolveConversationStoreDir(AppConfig config)
+    {
+        var configured = string.IsNullOrWhiteSpace(config.ConversationStoreDir)
+            ? "conversations"
+            : config.ConversationStoreDir.Trim();
+
+        return Path.IsPathRooted(configured)
+            ? configured
+            : Path.Combine(AppContext.BaseDirectory, configured);
+    }
+
     public AppConfig Load()
     {
         try

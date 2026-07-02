@@ -9,6 +9,8 @@ internal enum ChatRole
 
 internal class ChatMessage
 {
+    public string MessageId { get; set; } = Guid.NewGuid().ToString("N");
+    public string? ConversationId { get; set; }
     public ChatRole Role { get; set; }
     public string Prompt { get; set; } = "";
     public List<string> AttachedImagePaths { get; set; } = [];
