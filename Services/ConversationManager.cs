@@ -92,6 +92,19 @@ internal class ConversationManager
         await PersistActiveAsync().ConfigureAwait(false);
     }
 
+    public async Task AddMessageToConversationAsync(string conversationId, ChatMessage message)
+    {
+        var conversation = await GetConversationAsync(conversationId).ConfigureAwait(false);
+        if (conversation == null)
+            return;
+
+        conversation.AddMessage(message);
+        _compressor.TryCompress(conversation);
+        UpsertMeta(conversation);
+        await _store.SaveConversationAsync(conversation).ConfigureAwait(false);
+        await _store.SaveIndexAsync(_conversationList).ConfigureAwait(false);
+    }
+
     public async Task SaveActiveConversationAsync()
     {
         if (ActiveConversation == null)
@@ -118,14 +131,32 @@ internal class ConversationManager
 
     public async Task RenameConversationAsync(string conversationId, string title)
     {
-        var conversation = await SwitchToConversationAsync(conversationId).ConfigureAwait(false);
+        var conversation = await GetConversationAsync(conversationId).ConfigureAwait(false);
         if (conversation == null)
             return;
 
         conversation.Title = string.IsNullOrWhiteSpace(title) ? "新会话" : title.Trim();
         conversation.UpdatedAt = DateTime.Now;
         UpsertMeta(conversation);
-        await PersistActiveAsync().ConfigureAwait(false);
+        await _store.SaveConversationAsync(conversation).ConfigureAwait(false);
+        await _store.SaveIndexAsync(_conversationList).ConfigureAwait(false);
+    }
+
+    private async Task<Conversation?> GetConversationAsync(string conversationId)
+    {
+        if (ActiveConversation?.Id == conversationId)
+            return ActiveConversation;
+
+        if (_cache.TryGet(conversationId, out var cachedConversation))
+            return cachedConversation;
+
+        var conversation = await _store.LoadConversationAsync(conversationId).ConfigureAwait(false);
+        if (conversation == null)
+            return null;
+
+        EnsureConversationConfig(conversation);
+        _cache.Set(conversation);
+        return conversation;
     }
 
     private async Task PersistActiveAsync()

@@ -28,6 +28,7 @@ internal partial class MainForm : Form
     // State
     private readonly List<string> _attachedImages = [];
     private bool _isGenerating;
+    private readonly Dictionary<string, PendingResponseState> _pendingResponses = [];
     private Panel? _pendingResponseRow;
     private Panel? _pendingResponseBubble;
     private Label? _pendingResponseLabel;
@@ -38,8 +39,15 @@ internal partial class MainForm : Form
     private bool _isClosing;
     private int _lastChatScrollY;
     private bool _lastChatWasAtBottom = true;
-    private CancellationTokenSource? _generationCts;
     private readonly Dictionary<(int SizeHundredths, FontStyle Style), Font> _fontCache = [];
+
+    private sealed class PendingResponseState
+    {
+        public required string ConversationId { get; init; }
+        public string Text { get; set; } = "";
+        public bool IsError { get; set; }
+        public CancellationTokenSource? Cancellation { get; set; }
+    }
 
     public MainForm()
     {
@@ -448,7 +456,7 @@ internal partial class MainForm : Form
 
     private async void NewConversationBtn_Click(object? sender, EventArgs e)
     {
-        if (_conversationManager == null || _isGenerating)
+        if (_conversationManager == null)
             return;
 
         await _conversationManager.SaveActiveConversationAsync();
@@ -466,7 +474,13 @@ internal partial class MainForm : Form
 
     private async void TriggerSend()
     {
-        if (_isGenerating) return;
+        if (_conversationManager?.ActiveConversation == null)
+            return;
+
+        var conversation = _conversationManager.ActiveConversation;
+        var conversationId = conversation.Id;
+        if (IsConversationGenerating(conversationId))
+            return;
 
         var prompt = _promptBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(prompt) && _attachedImages.Count == 0) return;
@@ -481,11 +495,11 @@ internal partial class MainForm : Form
 
         try
         {
-            if (_conversationManager?.ActiveConversation != null && _promptEnhancer != null)
+            if (_promptEnhancer != null)
             {
                 var enhanceResult = _promptEnhancer.Enhance(
                     prompt,
-                    _conversationManager.ActiveConversation,
+                    conversation,
                     attachedCopy);
                 enhancedPrompt = enhanceResult.EnhancedPrompt;
                 contextDecision = enhanceResult.Decision;
@@ -499,20 +513,25 @@ internal partial class MainForm : Form
             var userMsg = ChatMessage.UserMessage(prompt, [.. attachedCopy]);
             if (_conversationManager != null)
             {
-                await _conversationManager.AddMessageToActiveConversationAsync(userMsg);
-                RebuildConversationTabs();
-                UpdateTitleBarText();
+                await _conversationManager.AddMessageToConversationAsync(conversationId, userMsg);
+                if (IsActiveConversation(conversationId))
+                {
+                    RebuildConversationTabs();
+                    UpdateTitleBarText();
+                }
             }
 
-            AddChatBubble(userMsg);
+            if (IsActiveConversation(conversationId))
+                AddChatBubble(userMsg);
             var initialStatus = BuildInitialGenerationStatus(
                 contextDecision,
-                _conversationManager?.ActiveConversation);
-            AddPendingResponseBubble(initialStatus);
-            ShowLoading(true, initialStatus);
+                conversation);
 
-            if (_apiService == null)
-                _apiService = new ImageApiService(_config);
+            var apiService = new ImageApiService(_config);
+            using var cts = new CancellationTokenSource(
+                TimeSpan.FromMinutes(_config.TimeoutMinutes + 1));
+            RegisterPendingResponse(conversationId, initialStatus, cts);
+            RefreshActiveConversationControls();
 
             var progress = new Progress<string>(msg =>
             {
@@ -522,17 +541,13 @@ internal partial class MainForm : Form
                         if (IsDisposed || _isClosing)
                             return;
 
-                        ShowLoading(true, msg);
-                        UpdatePendingResponseBubble(msg);
+                        UpdatePendingResponseBubble(conversationId, msg);
+                        RefreshActiveConversationControls();
                     });
             });
 
-            using var cts = new CancellationTokenSource(
-                TimeSpan.FromMinutes(_config.TimeoutMinutes + 1));
-            _generationCts = cts;
-
             var result = await Task.Run(() =>
-                _apiService.GenerateAsync(enhancedPrompt, attachedCopy, progress, cts.Token));
+                apiService.GenerateAsync(enhancedPrompt, attachedCopy, progress, cts.Token));
 
             if (_isClosing || IsDisposed)
                 return;
@@ -546,21 +561,26 @@ internal partial class MainForm : Form
                 if (_conversationManager != null)
                 {
                     assistantMsg.GeneratedImageDataUrl = null;
-                    await _conversationManager.AddMessageToActiveConversationAsync(assistantMsg);
+                    await _conversationManager.AddMessageToConversationAsync(conversationId, assistantMsg);
                     assistantMsg.GeneratedImageDataUrl = dataUrl;
                 }
 
-                if (i == 0)
-                    CompletePendingResponseWithMessage(assistantMsg);
-                else
-                    AddChatBubble(assistantMsg);
+                if (IsActiveConversation(conversationId))
+                {
+                    if (i == 0)
+                        CompletePendingResponseWithMessage(conversationId, assistantMsg);
+                    else
+                        AddChatBubble(assistantMsg);
+                }
             }
 
             var completionMsg = ChatMessage.SystemMessage(BuildCompletionMessage(result));
             if (_conversationManager != null)
-                await _conversationManager.AddMessageToActiveConversationAsync(completionMsg);
-            AddChatBubble(completionMsg);
-            RebuildConversationTabs();
+                await _conversationManager.AddMessageToConversationAsync(conversationId, completionMsg);
+            if (IsActiveConversation(conversationId))
+                AddChatBubble(completionMsg);
+            if (IsActiveConversation(conversationId))
+                RebuildConversationTabs();
         }
         catch (Exception ex)
         {
@@ -577,18 +597,23 @@ internal partial class MainForm : Form
                 InvalidOperationException opEx => opEx.Message,
                 _ => $"未知错误：{ex.Message}",
             };
-            CompletePendingResponseWithError(errorMsg);
+            if (_conversationManager != null)
+                await _conversationManager.AddMessageToConversationAsync(
+                    conversationId,
+                    ChatMessage.SystemMessage(errorMsg));
+
+            if (IsActiveConversation(conversationId))
+                CompletePendingResponseWithError(conversationId, errorMsg);
         }
         finally
         {
-            _generationCts = null;
-
+            ClearPendingResponse(conversationId);
+            _isGenerating = _pendingResponses.Count > 0;
             if (!_isClosing && !IsDisposed)
-                ShowLoading(false);
-
-            _isGenerating = false;
-            if (!_isClosing && !IsDisposed)
+            {
+                RefreshActiveConversationControls();
                 _promptBox.Focus();
+            }
         }
     }
 
@@ -599,10 +624,7 @@ internal partial class MainForm : Form
     {
         if (show)
         {
-            _loadingLabel.Text = text ?? "🔄 正在生成图片...";
-            CenterLoadingLabel();
-            _loadingOverlay.Visible = true;
-            _loadingOverlay.BringToFront();
+            _loadingOverlay.Visible = false;
             _sendBtn.Enabled = false;
             _attachBtn.Enabled = false;
         }
@@ -618,6 +640,26 @@ internal partial class MainForm : Form
     {
         _loadingLabel.Left = Math.Max(0, (_loadingOverlay.Width - _loadingLabel.PreferredWidth) / 2);
         _loadingLabel.Top = Math.Max(0, (_loadingOverlay.Height - _loadingLabel.PreferredHeight) / 2);
+    }
+
+    private bool IsActiveConversation(string conversationId) =>
+        string.Equals(
+            _conversationManager?.ActiveConversationId,
+            conversationId,
+            StringComparison.OrdinalIgnoreCase);
+
+    private bool IsConversationGenerating(string conversationId) =>
+        _pendingResponses.ContainsKey(conversationId);
+
+    private void RefreshActiveConversationControls()
+    {
+        var activeConversationId = _conversationManager?.ActiveConversationId;
+        var activeConversationGenerating = activeConversationId != null
+            && IsConversationGenerating(activeConversationId);
+
+        _isGenerating = _pendingResponses.Count > 0;
+        _sendBtn.Enabled = !activeConversationGenerating;
+        _attachBtn.Enabled = !activeConversationGenerating;
     }
 
     private void AddChatBubble(ChatMessage msg)
@@ -692,12 +734,17 @@ internal partial class MainForm : Form
         var messages = _conversationManager?.ActiveConversation?.Messages;
         if (messages == null || messages.Count == 0)
         {
-            AddWelcomeMessage();
+            if (!TryRestorePendingResponseForActiveConversation())
+                AddWelcomeMessage();
+            RefreshActiveConversationControls();
             return;
         }
 
         foreach (var message in messages)
             AddChatBubble(message);
+
+        TryRestorePendingResponseForActiveConversation();
+        RefreshActiveConversationControls();
     }
 
     private void RebuildConversationTabs()
@@ -755,7 +802,7 @@ internal partial class MainForm : Form
 
     private async Task SwitchConversationAsync(string conversationId)
     {
-        if (_conversationManager == null || _isGenerating)
+        if (_conversationManager == null)
             return;
 
         await _conversationManager.SwitchToConversationAsync(conversationId);
@@ -767,7 +814,7 @@ internal partial class MainForm : Form
 
     private async Task DeleteConversationAsync(string conversationId)
     {
-        if (_conversationManager == null || _isGenerating)
+        if (_conversationManager == null)
             return;
 
         if (_conversationManager.ConversationList.Count <= 1)
@@ -783,6 +830,12 @@ internal partial class MainForm : Form
             return;
 
         var deletingActive = conversationId == _conversationManager.ActiveConversationId;
+        if (_pendingResponses.TryGetValue(conversationId, out var pendingState))
+        {
+            pendingState.Cancellation?.Cancel();
+            ClearPendingResponse(conversationId);
+        }
+
         await _conversationManager.DeleteConversationAsync(conversationId);
         if (deletingActive)
         {
@@ -1047,7 +1100,21 @@ internal partial class MainForm : Form
 
     private void LayoutBubbleRow(Panel row, Control bubble, ChatRole role)
     {
-        var availableWidth = Math.Max(ScaleValue(180), row.ClientSize.Width);
+        var rowWidth = Math.Max(ScaleValue(180), row.ClientSize.Width);
+        var isLeftSystemBubble = role == ChatRole.System && bubble is Panel { Tag: "system-bubble" };
+        var availableWidth = role switch
+        {
+            ChatRole.User or ChatRole.Assistant => GetBubbleMaxWidth(rowWidth),
+            ChatRole.System => isLeftSystemBubble ? GetBubbleMaxWidth(rowWidth) : GetSystemBubbleMaxWidth(rowWidth),
+            _ => rowWidth,
+        };
+        bubble.MaximumSize = new Size(availableWidth, 0);
+
+        if (bubble is Panel { Tag: "system-bubble" } systemBubble)
+            LayoutSystemBubble(systemBubble, availableWidth);
+        else if (bubble is Panel { Tag: "system-center" } centeredSystemBubble)
+            LayoutCenteredSystemBubble(centeredSystemBubble, availableWidth);
+
         if (bubble.AutoSize)
         {
             var preferred = bubble.GetPreferredSize(new Size(availableWidth, 0));
@@ -1064,7 +1131,7 @@ internal partial class MainForm : Form
         bubble.Left = role switch
         {
             ChatRole.User => Math.Max(0, row.ClientSize.Width - bubble.Width),
-            ChatRole.System => Math.Max(0, (row.ClientSize.Width - bubble.Width) / 2),
+            ChatRole.System when !isLeftSystemBubble => Math.Max(0, (row.ClientSize.Width - bubble.Width) / 2),
             _ => 0,
         };
     }
@@ -1422,13 +1489,61 @@ internal partial class MainForm : Form
             || msg.ErrorText?.Contains("超时") == true
             || msg.ErrorText?.Contains("API") == true;
 
+        if (!isError)
+            return CreateCenteredSystemBubble(msg, maxWidth);
+
+        var padding = new Padding(ScaleValue(12), ScaleValue(8), ScaleValue(12), ScaleValue(8));
+        var contentMaxWidth = Math.Max(ScaleValue(120), maxWidth - padding.Horizontal);
+        var panelBackColor = isError ? Color.FromArgb(254, 242, 242) : Color.White;
+
+        var label = new Label
+        {
+            Text = msg.ErrorText ?? "",
+            AutoSize = true,
+            MaximumSize = new Size(contentMaxWidth, 0),
+            ForeColor = isError ? Color.FromArgb(185, 28, 28) : Color.FromArgb(71, 85, 105),
+            BackColor = panelBackColor,
+            Font = UiFont(9F),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Padding = new Padding(0),
+            Location = new Point(padding.Left, padding.Top),
+        };
+
+        var panel = new Panel
+        {
+            AutoSize = false,
+            MaximumSize = new Size(maxWidth, 0),
+            BackColor = panelBackColor,
+            Padding = padding,
+            Margin = new Padding(0),
+            Tag = "system-bubble",
+        };
+        panel.Paint += (_, e) =>
+        {
+            using var brush = new SolidBrush(panel.BackColor);
+            e.Graphics.FillRectangle(brush, panel.ClientRectangle);
+            var accent = isError ? Color.FromArgb(239, 68, 68) : Color.FromArgb(148, 163, 184);
+            ControlPaint.DrawBorder(e.Graphics, panel.ClientRectangle,
+                accent, 4, ButtonBorderStyle.Solid,
+                Color.FromArgb(226, 232, 240), 1, ButtonBorderStyle.Solid,
+                Color.FromArgb(226, 232, 240), 1, ButtonBorderStyle.Solid,
+                Color.FromArgb(226, 232, 240), 1, ButtonBorderStyle.Solid);
+        };
+        panel.Controls.Add(label);
+        LayoutSystemBubble(panel, maxWidth);
+
+        return panel;
+    }
+
+    private Panel CreateCenteredSystemBubble(ChatMessage msg, int maxWidth)
+    {
         var label = new Label
         {
             Text = msg.ErrorText ?? "",
             AutoSize = true,
             MaximumSize = new Size(maxWidth - ScaleValue(30), 0),
-            ForeColor = isError ? Color.FromArgb(185, 28, 28) : Color.FromArgb(71, 85, 105),
-            BackColor = isError ? Color.FromArgb(254, 242, 242) : Color.FromArgb(241, 245, 249),
+            ForeColor = Color.FromArgb(71, 85, 105),
+            BackColor = Color.FromArgb(241, 245, 249),
             Font = UiFont(9F),
             TextAlign = ContentAlignment.MiddleCenter,
             Padding = new Padding(ScaleValue(8), ScaleValue(6), ScaleValue(8), ScaleValue(6)),
@@ -1439,19 +1554,73 @@ internal partial class MainForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             MaximumSize = new Size(maxWidth, 0),
+            Tag = "system-center",
         };
         panel.Controls.Add(label);
 
         return panel;
     }
 
-    private void AddPendingResponseBubble(string text)
+    private void LayoutCenteredSystemBubble(Panel panel, int maxWidth)
     {
-        RemovePendingResponseBubble();
+        var label = panel.Controls.OfType<Label>().FirstOrDefault();
+        if (label == null)
+            return;
+
+        label.MaximumSize = new Size(Math.Max(ScaleValue(120), maxWidth - ScaleValue(30)), 0);
+    }
+
+    private void LayoutSystemBubble(Panel panel, int maxWidth)
+    {
+        var label = panel.Controls.OfType<Label>().FirstOrDefault();
+        if (label == null)
+            return;
+
+        var contentMaxWidth = Math.Max(ScaleValue(120), maxWidth - panel.Padding.Horizontal);
+        label.MaximumSize = new Size(contentMaxWidth, 0);
+        label.Location = new Point(panel.Padding.Left, panel.Padding.Top);
+
+        var preferred = label.GetPreferredSize(new Size(contentMaxWidth, 0));
+        label.Size = preferred;
+        panel.Size = new Size(
+            Math.Min(maxWidth, preferred.Width + panel.Padding.Horizontal),
+            preferred.Height + panel.Padding.Vertical);
+    }
+
+    private void RegisterPendingResponse(
+        string conversationId,
+        string text,
+        CancellationTokenSource cancellation)
+    {
+        _pendingResponses[conversationId] = new PendingResponseState
+        {
+            ConversationId = conversationId,
+            Text = text,
+            Cancellation = cancellation,
+        };
+
+        _isGenerating = true;
+        if (IsActiveConversation(conversationId))
+            AddPendingResponseBubble(_pendingResponses[conversationId]);
+    }
+
+    private bool TryRestorePendingResponseForActiveConversation()
+    {
+        var conversationId = _conversationManager?.ActiveConversationId;
+        if (conversationId == null || !_pendingResponses.TryGetValue(conversationId, out var state))
+            return false;
+
+        AddPendingResponseBubble(state);
+        return true;
+    }
+
+    private void AddPendingResponseBubble(PendingResponseState state)
+    {
+        RemoveVisiblePendingResponseBubble();
 
         var rowWidth = GetChatRowWidth();
         var bubbleWidth = GetBubbleMaxWidth(rowWidth);
-        _pendingResponseBubble = CreatePendingBubble(text, bubbleWidth, false);
+        _pendingResponseBubble = CreatePendingBubble(state.Text, bubbleWidth, state.IsError);
         _pendingResponseLabel = _pendingResponseBubble.Controls.OfType<Label>().FirstOrDefault();
         _pendingResponseRow = CreateBubbleRow(_pendingResponseBubble, ChatRole.Assistant, rowWidth);
         _chatPanel.Controls.Add(_pendingResponseRow);
@@ -1535,8 +1704,18 @@ internal partial class MainForm : Form
         };
     }
 
-    private void UpdatePendingResponseBubble(string text)
+    private void UpdatePendingResponseBubble(string conversationId, string text)
     {
+        if (!_pendingResponses.TryGetValue(conversationId, out var state))
+            return;
+
+        state.Text = text;
+        if (!IsActiveConversation(conversationId))
+            return;
+
+        if (_pendingResponseRow == null)
+            AddPendingResponseBubble(state);
+
         if (_pendingResponseLabel == null || _pendingResponseRow == null) return;
 
         _pendingResponseLabel.Text = $"⏳ {text}";
@@ -1546,8 +1725,17 @@ internal partial class MainForm : Form
         ScrollChatToBottom();
     }
 
-    private void CompletePendingResponseWithError(string text)
+    private void CompletePendingResponseWithError(string conversationId, string text)
     {
+        if (_pendingResponses.TryGetValue(conversationId, out var state))
+        {
+            state.Text = text;
+            state.IsError = true;
+        }
+
+        if (!IsActiveConversation(conversationId))
+            return;
+
         if (_pendingResponseRow == null)
         {
             AddChatBubble(ChatMessage.SystemMessage(text));
@@ -1569,8 +1757,11 @@ internal partial class MainForm : Form
         ScrollChatToBottom();
     }
 
-    private void CompletePendingResponseWithMessage(ChatMessage msg)
+    private void CompletePendingResponseWithMessage(string conversationId, ChatMessage msg)
     {
+        if (!IsActiveConversation(conversationId))
+            return;
+
         if (_pendingResponseRow == null)
         {
             AddChatBubble(msg);
@@ -1591,7 +1782,15 @@ internal partial class MainForm : Form
         ScrollChatToBottom();
     }
 
-    private void RemovePendingResponseBubble()
+    private void ClearPendingResponse(string conversationId)
+    {
+        _pendingResponses.Remove(conversationId);
+        _isGenerating = _pendingResponses.Count > 0;
+        if (IsActiveConversation(conversationId) && _pendingResponseRow != null)
+            RemoveVisiblePendingResponseBubble();
+    }
+
+    private void RemoveVisiblePendingResponseBubble()
     {
         if (_pendingResponseRow != null)
         {
@@ -1723,8 +1922,11 @@ internal partial class MainForm : Form
         }
 
         _isClosing = true;
-        _generationCts?.Cancel();
-        _conversationManager?.SaveActiveConversationAsync().GetAwaiter().GetResult();
+        foreach (var pendingState in _pendingResponses.Values)
+            pendingState.Cancellation?.Cancel();
+        // Save conversation without blocking the UI thread — let it run asynchronously
+        if (_conversationManager != null)
+            _ = _conversationManager.SaveActiveConversationAsync();
         _configManager.Save(_config);
         base.OnFormClosing(e);
     }
