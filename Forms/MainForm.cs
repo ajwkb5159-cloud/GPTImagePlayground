@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using ImageGenerator.Models;
 using ImageGenerator.Services;
@@ -28,7 +29,7 @@ internal partial class MainForm : Form
     // State
     private readonly List<string> _attachedImages = [];
     private bool _isGenerating;
-    private readonly Dictionary<string, PendingResponseState> _pendingResponses = [];
+    private readonly ConcurrentDictionary<string, PendingResponseState> _pendingResponses = [];
     private Panel? _pendingResponseRow;
     private Panel? _pendingResponseBubble;
     private Label? _pendingResponseLabel;
@@ -527,9 +528,9 @@ internal partial class MainForm : Form
                 contextDecision,
                 conversation);
 
-            var apiService = new ImageApiService(_config);
+            var apiService = _apiService ?? new ImageApiService(_config);
             using var cts = new CancellationTokenSource(
-                TimeSpan.FromMinutes(_config.TimeoutMinutes + 1));
+                TimeSpan.FromMinutes(Math.Max(1, _config.TimeoutMinutes)));
             RegisterPendingResponse(conversationId, initialStatus, cts);
             RefreshActiveConversationControls();
 
@@ -1390,6 +1391,7 @@ internal partial class MainForm : Form
                     Size = new Size(previewWidth, previewHeight),
                     Location = new Point(padding, y),
                 };
+                pictureBox.Disposed += DisposePictureBoxImage;
                 pictureBox.DoubleClick += (_, _) =>
                 {
                     OpenGeneratedImage(msg.GeneratedImagePath);
@@ -1455,6 +1457,16 @@ internal partial class MainForm : Form
             throw new FileNotFoundException("No generated image path was provided.");
 
         return LoadImageFromBytes(File.ReadAllBytes(msg.GeneratedImagePath));
+    }
+
+    private static void DisposePictureBoxImage(object? sender, EventArgs e)
+    {
+        if (sender is not PictureBox pictureBox)
+            return;
+
+        var image = pictureBox.Image;
+        pictureBox.Image = null;
+        image?.Dispose();
     }
 
     private static void OpenGeneratedImage(string? imagePath)
@@ -1592,16 +1604,17 @@ internal partial class MainForm : Form
         string text,
         CancellationTokenSource cancellation)
     {
-        _pendingResponses[conversationId] = new PendingResponseState
+        var state = new PendingResponseState
         {
             ConversationId = conversationId,
             Text = text,
             Cancellation = cancellation,
         };
+        _pendingResponses[conversationId] = state;
 
         _isGenerating = true;
         if (IsActiveConversation(conversationId))
-            AddPendingResponseBubble(_pendingResponses[conversationId]);
+            AddPendingResponseBubble(state);
     }
 
     private bool TryRestorePendingResponseForActiveConversation()
@@ -1784,7 +1797,7 @@ internal partial class MainForm : Form
 
     private void ClearPendingResponse(string conversationId)
     {
-        _pendingResponses.Remove(conversationId);
+        _pendingResponses.TryRemove(conversationId, out _);
         _isGenerating = _pendingResponses.Count > 0;
         if (IsActiveConversation(conversationId) && _pendingResponseRow != null)
             RemoveVisiblePendingResponseBubble();
@@ -1924,9 +1937,17 @@ internal partial class MainForm : Form
         _isClosing = true;
         foreach (var pendingState in _pendingResponses.Values)
             pendingState.Cancellation?.Cancel();
-        // Save conversation without blocking the UI thread — let it run asynchronously
         if (_conversationManager != null)
-            _ = _conversationManager.SaveActiveConversationAsync();
+        {
+            try
+            {
+                _conversationManager.SaveActiveConversationAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[MainForm] Failed to save active conversation while closing: {ex.Message}");
+            }
+        }
         _configManager.Save(_config);
         base.OnFormClosing(e);
     }

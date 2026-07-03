@@ -47,6 +47,7 @@ internal partial class SettingsForm : Form
         _modelBox.Text = currentConfig.Model;
         _outputDirBox.Text = currentConfig.OutputDir;
         _timeoutNumeric.Value = Clamp(currentConfig.TimeoutMinutes, _timeoutNumeric.Minimum, _timeoutNumeric.Maximum);
+        _verifySslCertificateCheck.Checked = currentConfig.VerifySslCertificate;
 
         SelectComboValue(_sizeTierBox, currentConfig.SizeTier, "1K");
         SelectComboValue(_aspectRatioBox, currentConfig.AspectRatio, "1:1");
@@ -671,6 +672,7 @@ internal partial class SettingsForm : Form
             Model = _modelBox.Text.Trim(),
             OutputDir = _outputDirBox.Text.Trim(),
             TimeoutMinutes = (int)_timeoutNumeric.Value,
+            VerifySslCertificate = _verifySslCertificateCheck.Checked,
             SizeMode = GetSelectedSizeMode(),
             SizeTier = _sizeTierBox.SelectedItem?.ToString() ?? "1K",
             AspectRatio = _aspectRatioBox.SelectedItem?.ToString() ?? "1:1",

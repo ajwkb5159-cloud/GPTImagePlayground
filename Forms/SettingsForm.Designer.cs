@@ -19,6 +19,7 @@ partial class SettingsForm
     private TextBox _outputDirBox;
     private Button browseBtn;
     private NumericUpDown _timeoutNumeric;
+    private CheckBox _verifySslCertificateCheck;
 
     private TableLayoutPanel sizeTable;
     private RadioButton _sizeAutoRadio;
@@ -90,6 +91,8 @@ partial class SettingsForm
         browseBtn = new Button();
         lblTimeout = new Label();
         _timeoutNumeric = new NumericUpDown();
+        lblVerifySsl = new Label();
+        _verifySslCertificateCheck = new CheckBox();
         sizeTable = new TableLayoutPanel();
         _sizeAutoRadio = new RadioButton();
         _sizePresetRadio = new RadioButton();
@@ -170,11 +173,13 @@ partial class SettingsForm
         basicTable.Controls.Add(browseBtn, 2, 3);
         basicTable.Controls.Add(lblTimeout, 0, 4);
         basicTable.Controls.Add(_timeoutNumeric, 1, 4);
+        basicTable.Controls.Add(lblVerifySsl, 0, 5);
+        basicTable.Controls.Add(_verifySslCertificateCheck, 1, 5);
         basicTable.Dock = DockStyle.Fill;
         basicTable.Location = new Point(12, 12);
         basicTable.Name = "basicTable";
-        basicTable.RowCount = 6;
-        for (var i = 0; i < 5; i++)
+        basicTable.RowCount = 7;
+        for (var i = 0; i < 6; i++)
             basicTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
         basicTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         basicTable.Size = new Size(572, 292);
@@ -269,6 +274,24 @@ partial class SettingsForm
         _timeoutNumeric.Size = new Size(96, 24);
         _timeoutNumeric.TabIndex = 7;
         _timeoutNumeric.Value = new decimal(new int[] { 1, 0, 0, 0 });
+
+        lblVerifySsl.Location = new Point(3, 220);
+        lblVerifySsl.Name = "lblVerifySsl";
+        lblVerifySsl.Size = new Size(104, 44);
+        lblVerifySsl.Text = "验证 TLS 证书";
+        lblVerifySsl.TextAlign = ContentAlignment.MiddleLeft;
+
+        _verifySslCertificateCheck.Anchor = AnchorStyles.Left;
+        _verifySslCertificateCheck.AutoSize = true;
+        _verifySslCertificateCheck.Checked = true;
+        _verifySslCertificateCheck.CheckState = CheckState.Checked;
+        _verifySslCertificateCheck.Location = new Point(110, 231);
+        _verifySslCertificateCheck.Margin = new Padding(0, 7, 8, 7);
+        _verifySslCertificateCheck.Name = "_verifySslCertificateCheck";
+        _verifySslCertificateCheck.Size = new Size(53, 21);
+        _verifySslCertificateCheck.TabIndex = 8;
+        _verifySslCertificateCheck.Text = "true";
+        _verifySslCertificateCheck.UseVisualStyleBackColor = true;
 
         sizeTab.Controls.Add(sizeTable);
         sizeTab.Location = new Point(4, 26);
@@ -622,6 +645,7 @@ partial class SettingsForm
     private Label lblModel;
     private Label lblOutputDir;
     private Label lblTimeout;
+    private Label lblVerifySsl;
     private Label lblSizeTier;
     private Label lblAspectRatio;
     private Label lblCustomWidth;
