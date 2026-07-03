@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace ImageGenerator.Models;
 
 internal class AppConfig
@@ -20,4 +18,16 @@ internal class AppConfig
     public int ImageCount { get; set; } = 1;
     public bool UseConcurrentStrategy { get; set; } = true;
     public int MaxConcurrency { get; set; } = 4;
+    public string ConversationStoreDir { get; set; } = "conversations";
+    public string? LastConversationId { get; set; }
+    public int MaxActiveMessages { get; set; } = 20;
+    public int CompressionTriggerCount { get; set; } = 30;
+    public int KeepRecentCount { get; set; } = 10;
+    public int MaxContextPrompts { get; set; } = 5;
+    public int MaxContextImages { get; set; } = 1;
+    public decimal ContextAutoAttachThreshold { get; set; } = 0.55M;
+    public bool ShowContextDecisionHint { get; set; } = true;
+    public bool AllowHistoryImagesWithManualAttachments { get; set; }
+    public bool EnableReferenceDetection { get; set; } = true;
+    public bool EnablePromptEnhancement { get; set; } = true;
 }
