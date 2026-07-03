@@ -7,6 +7,7 @@ internal class AppConfig
     public string Model { get; set; } = "gpt-image-2";
     public string OutputDir { get; set; } = "";
     public int TimeoutMinutes { get; set; } = 10;
+    public bool VerifySslCertificate { get; set; } = true;
     public string SizeMode { get; set; } = "auto";
     public string SizeTier { get; set; } = "1K";
     public string AspectRatio { get; set; } = "1:1";

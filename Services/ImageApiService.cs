@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Security;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -13,12 +15,47 @@ internal class ImageApiService
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
+    private static readonly SocketsHttpHandler VerifiedHttpHandler = CreateHttpHandler(true);
+    private static readonly SocketsHttpHandler UnverifiedHttpHandler = CreateHttpHandler(false);
 
     private readonly AppConfig _config;
 
     public ImageApiService(AppConfig config)
     {
         _config = config;
+    }
+
+    private static SocketsHttpHandler CreateHttpHandler(bool verifySslCertificate)
+    {
+        var handler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        };
+
+        if (!verifySslCertificate)
+        {
+            handler.SslOptions = new SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (_, _, _, _) => true,
+            };
+        }
+
+        return handler;
+    }
+
+    private HttpClient CreateHttpClient()
+    {
+        var handler = _config.VerifySslCertificate
+            ? VerifiedHttpHandler
+            : UnverifiedHttpHandler;
+        var timeoutMinutes = Math.Max(1, _config.TimeoutMinutes);
+        var httpClient = new HttpClient(handler, disposeHandler: false)
+        {
+            Timeout = TimeSpan.FromMinutes(timeoutMinutes),
+        };
+        httpClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", _config.ApiKey);
+        return httpClient;
     }
 
     /// <summary>
@@ -33,19 +70,7 @@ internal class ImageApiService
     {
         EnsureOutputDirectory();
 
-        var handler = new SocketsHttpHandler
-        {
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-            // 兼容自签名/非标准证书
-            SslOptions = new System.Net.Security.SslClientAuthenticationOptions
-            {
-                RemoteCertificateValidationCallback = (_, _, _, _) => true,
-            },
-        };
-
-        using var httpClient = new HttpClient(handler);
-        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_config.ApiKey}");
-        httpClient.Timeout = TimeSpan.FromMinutes(_config.TimeoutMinutes);
+        using var httpClient = CreateHttpClient();
 
         if (_config.UseConcurrentStrategy && _config.ImageCount > 1)
         {
