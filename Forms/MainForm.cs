@@ -19,6 +19,8 @@ internal partial class MainForm : Form
     private const float MinUiScale = 0.72F;
     private const float MaxUiScale = 1.08F;
     private const float DesignDpi = 96F;
+    private const int ResizeDebounceMs = 50;
+    private const int MaxThumbnailCacheEntries = 80;
 
     private readonly ConfigManager _configManager;
     private AppConfig _config;
@@ -41,6 +43,12 @@ internal partial class MainForm : Form
     private int _lastChatScrollY;
     private bool _lastChatWasAtBottom = true;
     private readonly Dictionary<(int SizeHundredths, FontStyle Style), Font> _fontCache = [];
+    private readonly System.Windows.Forms.Timer _resizeDebounceTimer = new() { Interval = ResizeDebounceMs };
+    private bool _resizeRestoreFromMinimized;
+    private int _resizeRestoreScrollY;
+    private bool _resizeRestoreToBottom;
+    private readonly Dictionary<string, ThumbnailCacheEntry> _thumbnailCache = [];
+    private readonly LinkedList<string> _thumbnailLru = [];
 
     private sealed class PendingResponseState
     {
@@ -48,6 +56,12 @@ internal partial class MainForm : Form
         public string Text { get; set; } = "";
         public bool IsError { get; set; }
         public CancellationTokenSource? Cancellation { get; set; }
+    }
+
+    private sealed class ThumbnailCacheEntry
+    {
+        public required Image Image { get; init; }
+        public required LinkedListNode<string> Node { get; init; }
     }
 
     public MainForm()
@@ -67,6 +81,7 @@ internal partial class MainForm : Form
         _sendBtn.Click += SendBtn_Click;
         _promptBox.KeyDown += PromptBox_KeyDown;
 
+        _resizeDebounceTimer.Tick += (_, _) => FlushResponsiveResize();
         Resize += (_, _) => HandleResponsiveResize();
 
         chatContainer.SizeChanged += (_, _) =>
@@ -131,15 +146,31 @@ internal partial class MainForm : Form
         if (WindowState == FormWindowState.Minimized)
         {
             _wasMinimized = true;
+            _resizeDebounceTimer.Stop();
             return;
         }
 
         var restoringFromMinimized = _wasMinimized;
-        var restoreScrollY = _lastChatScrollY;
-        var restoreToBottom = _lastChatWasAtBottom;
-
         if (!restoringFromMinimized)
             RememberChatScrollState();
+
+        _resizeRestoreFromMinimized |= restoringFromMinimized;
+        _resizeRestoreScrollY = _lastChatScrollY;
+        _resizeRestoreToBottom = _lastChatWasAtBottom;
+        _resizeDebounceTimer.Stop();
+        _resizeDebounceTimer.Start();
+    }
+
+    private void FlushResponsiveResize()
+    {
+        _resizeDebounceTimer.Stop();
+        if (IsDisposed || WindowState == FormWindowState.Minimized)
+            return;
+
+        var restoringFromMinimized = _resizeRestoreFromMinimized;
+        var restoreScrollY = _resizeRestoreScrollY;
+        var restoreToBottom = _resizeRestoreToBottom;
+        _resizeRestoreFromMinimized = false;
 
         ApplyResponsiveLayout();
 
@@ -311,6 +342,10 @@ internal partial class MainForm : Form
 
     private void DisposeCachedResources()
     {
+        _resizeDebounceTimer.Dispose();
+        DisposePendingResponses();
+        ClearThumbnailCache();
+
         foreach (var font in _fontCache.Values)
             font.Dispose();
 
@@ -450,23 +485,30 @@ internal partial class MainForm : Form
         }
     }
 
-    private async void SendBtn_Click(object? sender, EventArgs e)
+    private void SendBtn_Click(object? sender, EventArgs e)
     {
         TriggerSend();
     }
 
     private async void NewConversationBtn_Click(object? sender, EventArgs e)
     {
-        if (_conversationManager == null)
-            return;
+        try
+        {
+            if (_conversationManager == null)
+                return;
 
-        await _conversationManager.SaveActiveConversationAsync();
-        await _conversationManager.CreateConversationAsync();
-        _configManager.Save(_config);
-        RebuildConversationTabs();
-        LoadActiveConversationMessages();
-        UpdateTitleBarText();
-        _promptBox.Focus();
+            await _conversationManager.SaveActiveConversationAsync();
+            await _conversationManager.CreateConversationAsync();
+            _configManager.Save(_config);
+            RebuildConversationTabs();
+            LoadActiveConversationMessages();
+            UpdateTitleBarText();
+            _promptBox.Focus();
+        }
+        catch (Exception ex)
+        {
+            HandleUiException(ex, "创建新会话失败");
+        }
     }
 
     // ═══════════════════════════════════════════════════
@@ -556,15 +598,10 @@ internal partial class MainForm : Form
             for (int i = 0; i < result.SavedPaths.Count; i++)
             {
                 var imgPath = result.SavedPaths[i];
-                var dataUrl = i < result.DataUrls.Count ? result.DataUrls[i] : null;
                 var usage = i == 0 ? result.Usage : null;
-                var assistantMsg = ChatMessage.AssistantMessage(prompt, imgPath, dataUrl, usage);
+                var assistantMsg = ChatMessage.AssistantMessage(prompt, imgPath, null, usage);
                 if (_conversationManager != null)
-                {
-                    assistantMsg.GeneratedImageDataUrl = null;
                     await _conversationManager.AddMessageToConversationAsync(conversationId, assistantMsg);
-                    assistantMsg.GeneratedImageDataUrl = dataUrl;
-                }
 
                 if (IsActiveConversation(conversationId))
                 {
@@ -623,9 +660,14 @@ internal partial class MainForm : Form
 
     private void ShowLoading(bool show, string? text = null)
     {
+        if (!string.IsNullOrWhiteSpace(text))
+            _loadingLabel.Text = text;
+
         if (show)
         {
-            _loadingOverlay.Visible = false;
+            CenterLoadingLabel();
+            _loadingOverlay.Visible = true;
+            _loadingOverlay.BringToFront();
             _sendBtn.Enabled = false;
             _attachBtn.Enabled = false;
         }
@@ -803,74 +845,160 @@ internal partial class MainForm : Form
 
     private async Task SwitchConversationAsync(string conversationId)
     {
-        if (_conversationManager == null)
-            return;
+        try
+        {
+            if (_conversationManager == null)
+                return;
 
-        await _conversationManager.SwitchToConversationAsync(conversationId);
-        _configManager.Save(_config);
-        RebuildConversationTabs();
-        LoadActiveConversationMessages();
-        UpdateTitleBarText();
+            await _conversationManager.SwitchToConversationAsync(conversationId);
+            _configManager.Save(_config);
+            RebuildConversationTabs();
+            LoadActiveConversationMessages();
+            UpdateTitleBarText();
+        }
+        catch (Exception ex)
+        {
+            HandleUiException(ex, "切换会话失败");
+        }
     }
 
     private async Task DeleteConversationAsync(string conversationId)
     {
-        if (_conversationManager == null)
-            return;
-
-        if (_conversationManager.ConversationList.Count <= 1)
+        try
         {
-            MessageBox.Show(this, "至少保留一个会话。", "会话",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
+            if (_conversationManager == null)
+                return;
+
+            if (_conversationManager.ConversationList.Count <= 1)
+            {
+                MessageBox.Show(this, "至少保留一个会话。", "会话",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var result = MessageBox.Show(this, "确定要删除这个会话吗？", "会话",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (result != DialogResult.Yes)
+                return;
+
+            var deletingActive = conversationId == _conversationManager.ActiveConversationId;
+            if (_pendingResponses.TryGetValue(conversationId, out var pendingState))
+            {
+                pendingState.Cancellation?.Cancel();
+                if (deletingActive && _pendingResponseRow != null)
+                    RemoveVisiblePendingResponseBubble();
+            }
+
+            await _conversationManager.DeleteConversationAsync(conversationId);
+            if (deletingActive)
+            {
+                var next = _conversationManager.ConversationList.FirstOrDefault();
+                if (next != null)
+                    await _conversationManager.SwitchToConversationAsync(next.Id);
+            }
+
+            _configManager.Save(_config);
+            RebuildConversationTabs();
+            LoadActiveConversationMessages();
+            UpdateTitleBarText();
         }
-
-        var result = MessageBox.Show(this, "确定要删除这个会话吗？", "会话",
-            MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
-        if (result != DialogResult.Yes)
-            return;
-
-        var deletingActive = conversationId == _conversationManager.ActiveConversationId;
-        if (_pendingResponses.TryGetValue(conversationId, out var pendingState))
+        catch (Exception ex)
         {
-            pendingState.Cancellation?.Cancel();
-            ClearPendingResponse(conversationId);
+            HandleUiException(ex, "删除会话失败");
         }
-
-        await _conversationManager.DeleteConversationAsync(conversationId);
-        if (deletingActive)
-        {
-            var next = _conversationManager.ConversationList.FirstOrDefault();
-            if (next != null)
-                await _conversationManager.SwitchToConversationAsync(next.Id);
-        }
-
-        _configManager.Save(_config);
-        RebuildConversationTabs();
-        LoadActiveConversationMessages();
-        UpdateTitleBarText();
     }
 
     private async Task RenameConversationAsync(string conversationId)
     {
-        if (_conversationManager == null)
+        try
+        {
+            if (_conversationManager == null)
+                return;
+
+            var meta = _conversationManager.ConversationList.FirstOrDefault(item => item.Id == conversationId);
+            var title = PromptForConversationTitle(meta?.Title ?? "");
+
+            if (string.IsNullOrWhiteSpace(title))
+                return;
+
+            await _conversationManager.RenameConversationAsync(conversationId, title);
+            _configManager.Save(_config);
+            RebuildConversationTabs();
+            UpdateTitleBarText();
+        }
+        catch (Exception ex)
+        {
+            HandleUiException(ex, "重命名会话失败");
+        }
+    }
+
+    private string? PromptForConversationTitle(string currentTitle)
+    {
+        using var dialog = new Form
+        {
+            Text = "重命名",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowInTaskbar = false,
+            ClientSize = new Size(ScaleValue(360), ScaleValue(128)),
+            Font = UiFont(10F),
+            Padding = new Padding(ScaleValue(14)),
+        };
+
+        var label = new Label
+        {
+            Text = "会话标题",
+            AutoSize = true,
+            Location = new Point(dialog.Padding.Left, dialog.Padding.Top),
+        };
+        var titleBox = new TextBox
+        {
+            Text = currentTitle,
+            Location = new Point(dialog.Padding.Left, label.Bottom + ScaleValue(8)),
+            Width = dialog.ClientSize.Width - dialog.Padding.Horizontal,
+            Anchor = AnchorStyles.Left | AnchorStyles.Top | AnchorStyles.Right,
+        };
+        var okButton = new Button
+        {
+            Text = "确定",
+            DialogResult = DialogResult.OK,
+            Size = new Size(ScaleValue(82), ScaleValue(30)),
+            Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
+        };
+        var cancelButton = new Button
+        {
+            Text = "取消",
+            DialogResult = DialogResult.Cancel,
+            Size = okButton.Size,
+            Anchor = AnchorStyles.Right | AnchorStyles.Bottom,
+        };
+        okButton.Location = new Point(
+            dialog.ClientSize.Width - dialog.Padding.Right - okButton.Width,
+            dialog.ClientSize.Height - dialog.Padding.Bottom - okButton.Height);
+        cancelButton.Location = new Point(okButton.Left - ScaleValue(10) - cancelButton.Width, okButton.Top);
+
+        dialog.Controls.Add(label);
+        dialog.Controls.Add(titleBox);
+        dialog.Controls.Add(okButton);
+        dialog.Controls.Add(cancelButton);
+        dialog.AcceptButton = okButton;
+        dialog.CancelButton = cancelButton;
+
+        titleBox.SelectAll();
+        return dialog.ShowDialog(this) == DialogResult.OK
+            ? titleBox.Text.Trim()
+            : null;
+    }
+
+    private void HandleUiException(Exception ex, string title)
+    {
+        System.Diagnostics.Debug.WriteLine($"[MainForm] {title}: {ex}");
+        if (_isClosing || IsDisposed)
             return;
 
-        var meta = _conversationManager.ConversationList.FirstOrDefault(item => item.Id == conversationId);
-        var title = Microsoft.VisualBasic.Interaction.InputBox(
-            "会话标题",
-            "重命名",
-            meta?.Title ?? "",
-            -1,
-            -1);
-
-        if (string.IsNullOrWhiteSpace(title))
-            return;
-
-        await _conversationManager.RenameConversationAsync(conversationId, title);
-        _configManager.Save(_config);
-        RebuildConversationTabs();
-        UpdateTitleBarText();
+        MessageBox.Show(this, ex.Message, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 
     private Dictionary<string, int> BuildConversationDisplayNumbers()
@@ -1610,6 +1738,9 @@ internal partial class MainForm : Form
             Text = text,
             Cancellation = cancellation,
         };
+        if (_pendingResponses.TryRemove(conversationId, out var oldState))
+            oldState.Cancellation?.Dispose();
+
         _pendingResponses[conversationId] = state;
 
         _isGenerating = true;
@@ -1797,10 +1928,33 @@ internal partial class MainForm : Form
 
     private void ClearPendingResponse(string conversationId)
     {
-        _pendingResponses.TryRemove(conversationId, out _);
+        if (_pendingResponses.TryRemove(conversationId, out var state))
+            state.Cancellation?.Dispose();
+
         _isGenerating = _pendingResponses.Count > 0;
         if (IsActiveConversation(conversationId) && _pendingResponseRow != null)
             RemoveVisiblePendingResponseBubble();
+    }
+
+    private void DisposePendingResponses()
+    {
+        foreach (var conversationId in _pendingResponses.Keys)
+        {
+            if (!_pendingResponses.TryRemove(conversationId, out var state))
+                continue;
+
+            try
+            {
+                state.Cancellation?.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            finally
+            {
+                state.Cancellation?.Dispose();
+            }
+        }
     }
 
     private void RemoveVisiblePendingResponseBubble()
@@ -1905,7 +2059,7 @@ internal partial class MainForm : Form
 
         try
         {
-            pb.Image = LoadImageFromBytes(File.ReadAllBytes(imagePath));
+            pb.Image = GetCachedThumbnail(imagePath, size);
         }
         catch
         {
@@ -1913,6 +2067,73 @@ internal partial class MainForm : Form
         }
 
         return pb;
+    }
+
+    private Image GetCachedThumbnail(string imagePath, int size)
+    {
+        var key = CreateThumbnailCacheKey(imagePath, size);
+        if (_thumbnailCache.TryGetValue(key, out var cached))
+        {
+            _thumbnailLru.Remove(cached.Node);
+            _thumbnailLru.AddFirst(cached.Node);
+            return new Bitmap(cached.Image);
+        }
+
+        using var source = LoadImageFromBytes(File.ReadAllBytes(imagePath));
+        var thumbnail = CreateThumbnailImage(source, Math.Max(1, size));
+        var node = _thumbnailLru.AddFirst(key);
+        _thumbnailCache[key] = new ThumbnailCacheEntry
+        {
+            Image = thumbnail,
+            Node = node,
+        };
+        TrimThumbnailCache();
+        return new Bitmap(thumbnail);
+    }
+
+    private static string CreateThumbnailCacheKey(string imagePath, int size)
+    {
+        var fullPath = Path.GetFullPath(imagePath);
+        var info = new FileInfo(fullPath);
+        return $"{fullPath}|{size}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+    }
+
+    private static Image CreateThumbnailImage(Image source, int size)
+    {
+        var bitmap = new Bitmap(size, size);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.Transparent);
+        graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+
+        var scale = Math.Min((double)size / source.Width, (double)size / source.Height);
+        var width = Math.Max(1, (int)Math.Round(source.Width * scale));
+        var height = Math.Max(1, (int)Math.Round(source.Height * scale));
+        var left = (size - width) / 2;
+        var top = (size - height) / 2;
+        graphics.DrawImage(source, new Rectangle(left, top, width, height));
+        return bitmap;
+    }
+
+    private void TrimThumbnailCache()
+    {
+        while (_thumbnailCache.Count > MaxThumbnailCacheEntries && _thumbnailLru.Last != null)
+        {
+            var key = _thumbnailLru.Last.Value;
+            _thumbnailLru.RemoveLast();
+            if (_thumbnailCache.Remove(key, out var entry))
+                entry.Image.Dispose();
+        }
+    }
+
+    private void ClearThumbnailCache()
+    {
+        foreach (var entry in _thumbnailCache.Values)
+            entry.Image.Dispose();
+
+        _thumbnailCache.Clear();
+        _thumbnailLru.Clear();
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)

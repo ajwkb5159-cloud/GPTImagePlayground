@@ -77,6 +77,59 @@ internal static class ImageSizeResolver
             _ => 1_572_864,
         };
         var targetRatio = ratioWidth / ratioHeight;
+
+        if (!double.IsFinite(targetRatio)
+            || Math.Max(targetRatio, 1 / targetRatio) > MaxAspectRatio)
+        {
+            size = "";
+            return false;
+        }
+
+        if (TryCalculateSizeFast(pixelBudget, targetRatio, out size))
+            return true;
+
+        return TryCalculateSizeByScan(pixelBudget, targetRatio, out size);
+    }
+
+    private static bool TryCalculateSizeFast(int pixelBudget, double targetRatio, out string size)
+    {
+        var maxWidthByPixels = Math.Sqrt(pixelBudget * targetRatio);
+        var maxWidthByHeight = MaxEdge * targetRatio;
+        var anchorWidth = FloorToMultiple(
+            (int)Math.Floor(Math.Min(MaxEdge, Math.Min(maxWidthByPixels, maxWidthByHeight))),
+            SizeMultiple);
+
+        var bestWidth = 0;
+        var bestHeight = 0;
+        var bestPixels = 0;
+        foreach (var width in GetCandidateWidths(anchorWidth))
+        {
+            var idealHeight = width / targetRatio;
+            EvaluateCandidate(width, FloorToMultiple((int)Math.Floor(idealHeight), SizeMultiple), pixelBudget, targetRatio,
+                ref bestWidth, ref bestHeight, ref bestPixels);
+            EvaluateCandidate(width, CeilToMultiple((int)Math.Ceiling(idealHeight), SizeMultiple), pixelBudget, targetRatio,
+                ref bestWidth, ref bestHeight, ref bestPixels);
+        }
+
+        size = bestPixels > 0 ? $"{bestWidth}x{bestHeight}" : "";
+        return bestPixels > 0;
+    }
+
+    private static IEnumerable<int> GetCandidateWidths(int anchorWidth)
+    {
+        for (var offset = 0; offset <= 8; offset++)
+        {
+            var lower = anchorWidth - (offset * SizeMultiple);
+            var upper = anchorWidth + (offset * SizeMultiple);
+            if (lower >= SizeMultiple)
+                yield return lower;
+            if (offset > 0 && upper <= MaxEdge)
+                yield return upper;
+        }
+    }
+
+    private static bool TryCalculateSizeByScan(int pixelBudget, double targetRatio, out string size)
+    {
         var bestWidth = 0;
         var bestHeight = 0;
         var bestPixels = 0;
@@ -92,26 +145,39 @@ internal static class ImageSizeResolver
 
             foreach (var height in candidates)
             {
-                if (height < SizeMultiple || height > MaxEdge) continue;
-
-                var pixels = width * height;
-                if (pixels > pixelBudget || pixels < MinPixels) continue;
-                if (Math.Max((double)width / height, (double)height / width) > MaxAspectRatio) continue;
-
-                var ratioError = Math.Abs(((double)width / height) - targetRatio) / targetRatio;
-                if (ratioError > 0.01) continue;
-
-                if (pixels > bestPixels)
-                {
-                    bestPixels = pixels;
-                    bestWidth = width;
-                    bestHeight = height;
-                }
+                EvaluateCandidate(width, height, pixelBudget, targetRatio, ref bestWidth, ref bestHeight, ref bestPixels);
             }
         }
 
         size = bestPixels > 0 ? $"{bestWidth}x{bestHeight}" : "";
         return bestPixels > 0;
+    }
+
+    private static void EvaluateCandidate(
+        int width,
+        int height,
+        int pixelBudget,
+        double targetRatio,
+        ref int bestWidth,
+        ref int bestHeight,
+        ref int bestPixels)
+    {
+        if (width < SizeMultiple || width > MaxEdge || height < SizeMultiple || height > MaxEdge)
+            return;
+
+        var pixels = width * height;
+        if (pixels > pixelBudget || pixels < MinPixels)
+            return;
+        if (Math.Max((double)width / height, (double)height / width) > MaxAspectRatio)
+            return;
+
+        var ratioError = Math.Abs(((double)width / height) - targetRatio) / targetRatio;
+        if (ratioError > 0.01 || pixels <= bestPixels)
+            return;
+
+        bestPixels = pixels;
+        bestWidth = width;
+        bestHeight = height;
     }
 
     private static (int width, int height) NormalizeDimensions(int width, int height)

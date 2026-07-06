@@ -9,12 +9,14 @@ internal partial class SettingsForm : Form
     private const float MinUiScale = 0.78F;
     private const float MaxUiScale = 1.05F;
     private const float DesignDpi = 96F;
+    private const int ResizeDebounceMs = 50;
 
     private float _uiScale = 1F;
     private bool _isApplyingResponsiveLayout;
     private bool _wasMinimized;
     private bool _restoreLayoutQueued;
     private readonly Dictionary<(int SizeHundredths, FontStyle Style), Font> _fontCache = [];
+    private readonly System.Windows.Forms.Timer _resizeDebounceTimer = new() { Interval = ResizeDebounceMs };
     private int _savedImageCount;
     private ToolTip _contextToolTip = null!;
     private TabPage _contextTab = null!;
@@ -86,6 +88,7 @@ internal partial class SettingsForm : Form
         _sizeCustomRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
         _transparentBackgroundCheck.CheckedChanged += (_, _) => UpdateTransparentLabel();
         _concurrentCheck.CheckedChanged += (_, _) => UpdateConcurrencyControlStates();
+        _resizeDebounceTimer.Tick += (_, _) => FlushResponsiveResize();
         Resize += (_, _) => HandleResponsiveResize();
 
         ConfigureRoundedButtons();
@@ -284,12 +287,24 @@ internal partial class SettingsForm : Form
         if (WindowState == FormWindowState.Minimized)
         {
             _wasMinimized = true;
+            _resizeDebounceTimer.Stop();
             return;
         }
 
+        _resizeDebounceTimer.Stop();
+        _resizeDebounceTimer.Start();
+    }
+
+    private void FlushResponsiveResize()
+    {
+        _resizeDebounceTimer.Stop();
+        if (IsDisposed || WindowState == FormWindowState.Minimized)
+            return;
+
+        var restoringFromMinimized = _wasMinimized;
         ApplyResponsiveLayout();
 
-        if (_wasMinimized)
+        if (restoringFromMinimized)
         {
             _wasMinimized = false;
             QueueRestoreLayoutRefresh();
@@ -438,6 +453,8 @@ internal partial class SettingsForm : Form
 
     private void DisposeCachedResources()
     {
+        _resizeDebounceTimer.Dispose();
+
         foreach (var font in _fontCache.Values)
             font.Dispose();
 
@@ -715,9 +732,47 @@ internal partial class SettingsForm : Form
             MessageBox.Show(this, "模型名称不能为空。", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
+        if (!TryValidateWritableDirectory(Result.OutputDir, Path.GetTempPath(), out var outputDirError))
+        {
+            MessageBox.Show(this, $"输出目录不可用：{outputDirError}", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (!TryValidateWritableDirectory(Result.ConversationStoreDir, "conversations", out var conversationDirError))
+        {
+            MessageBox.Show(this, $"会话存储目录不可用：{conversationDirError}", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
 
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    private static bool TryValidateWritableDirectory(string? configuredPath, string fallbackPath, out string error)
+    {
+        error = "";
+        try
+        {
+            var effectivePath = string.IsNullOrWhiteSpace(configuredPath)
+                ? fallbackPath
+                : configuredPath.Trim();
+            var fullPath = Path.IsPathRooted(effectivePath)
+                ? effectivePath
+                : Path.Combine(AppContext.BaseDirectory, effectivePath);
+
+            Directory.CreateDirectory(fullPath);
+            var probePath = Path.Combine(fullPath, $".write-test-{Guid.NewGuid():N}.tmp");
+            File.WriteAllText(probePath, "");
+            File.Delete(probePath);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or NotSupportedException)
+        {
+            error = ex.Message;
+            return false;
+        }
     }
 
     private string GetSelectedSizeMode()
