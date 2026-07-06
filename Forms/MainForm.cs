@@ -53,7 +53,6 @@ internal partial class MainForm : Form
     public MainForm()
     {
         InitializeComponent();
-
         _configManager = new ConfigManager();
         _config = _configManager.Load();
         _apiService = new ImageApiService(_config);
