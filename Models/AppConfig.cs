@@ -31,4 +31,6 @@ internal class AppConfig
     public bool AllowHistoryImagesWithManualAttachments { get; set; }
     public bool EnableReferenceDetection { get; set; } = true;
     public bool EnablePromptEnhancement { get; set; } = true;
+    public string Theme { get; set; } = "light";
+    public string Language { get; set; } = "zh-CN";
 }

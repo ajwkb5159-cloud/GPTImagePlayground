@@ -34,6 +34,7 @@ internal partial class SettingsForm : Form
     private CheckBox _promptEnhancementCheck = null!;
     private CheckBox _showContextDecisionHintCheck = null!;
     private CheckBox _allowHistoryImagesWithManualAttachmentsCheck = null!;
+    private ToolTip _buttonToolTip = null!;
 
     public AppConfig Result { get; private set; }
 
@@ -41,8 +42,10 @@ internal partial class SettingsForm : Form
     {
         InitializeComponent();
         BuildContextTab();
+        BuildAppearanceTab();
 
         Result = currentConfig;
+        SetAppearanceSelections(currentConfig.Theme, currentConfig.Language);
 
         _baseUrlBox.Text = currentConfig.BaseUrl;
         _apiKeyBox.Text = currentConfig.ApiKey;
@@ -90,8 +93,13 @@ internal partial class SettingsForm : Form
         _concurrentCheck.CheckedChanged += (_, _) => UpdateConcurrencyControlStates();
         _resizeDebounceTimer.Tick += (_, _) => FlushResponsiveResize();
         Resize += (_, _) => HandleResponsiveResize();
+        tabs.SelectedIndexChanged += (_, _) => ApplyResponsiveLayout();
 
         ConfigureRoundedButtons();
+        _buttonToolTip = new ToolTip(components);
+        ApplyButtonIcons();
+        ApplyLocalization();
+        ApplyTheme();
         Load += (_, _) =>
         {
             FitInitialWindowToScreen();
@@ -101,427 +109,17 @@ internal partial class SettingsForm : Form
         UpdateConcurrencyControlStates();
     }
 
-    private void BuildContextTab()
-    {
-        _contextToolTip = new ToolTip(components)
-        {
-            AutoPopDelay = 12000,
-            InitialDelay = 350,
-            ReshowDelay = 120,
-            ShowAlways = true,
-        };
-
-        _contextTab = new TabPage
-        {
-            Text = "上下文",
-            Padding = new Padding(12),
-            UseVisualStyleBackColor = true,
-        };
-
-        _contextTable = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            ColumnCount = 4,
-            RowCount = 12,
-        };
-        _contextTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150F));
-        _contextTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        _contextTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 86F));
-        _contextTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 32F));
-        for (var i = 0; i < 11; i++)
-            _contextTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 42F));
-        _contextTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 54F));
-
-        _contextScrollPanel = new Panel
-        {
-            Dock = DockStyle.Fill,
-            AutoScroll = true,
-            AutoScrollMargin = new Size(0, 8),
-            Padding = new Padding(0, 0, 0, 8),
-        };
-
-        _conversationDirBox = new TextBox { Anchor = AnchorStyles.Left | AnchorStyles.Right };
-        _conversationBrowseBtn = new Button
-        {
-            Text = "浏览...",
-            Anchor = AnchorStyles.Left | AnchorStyles.Right,
-            Size = new Size(86, 28),
-        };
-        ApplyBrowseButtonStyle(_conversationBrowseBtn);
-        _maxActiveMessagesNumeric = CreateContextNumeric(5, 100, 20);
-        _compressionTriggerNumeric = CreateContextNumeric(10, 200, 30);
-        _keepRecentNumeric = CreateContextNumeric(3, 50, 10);
-        _maxContextPromptsNumeric = CreateContextNumeric(0, 20, 5);
-        _maxContextImagesNumeric = CreateContextNumeric(1, 5, 1);
-        _contextAutoAttachThresholdNumeric = new NumericUpDown
-        {
-            Minimum = 0.10M,
-            Maximum = 0.95M,
-            Increment = 0.05M,
-            DecimalPlaces = 2,
-            Value = 0.55M,
-            Size = new Size(96, 24),
-            Anchor = AnchorStyles.Left,
-        };
-        _referenceDetectionCheck = CreateContextCheckBox();
-        _promptEnhancementCheck = CreateContextCheckBox();
-        _showContextDecisionHintCheck = CreateContextCheckBox();
-        _allowHistoryImagesWithManualAttachmentsCheck = CreateContextCheckBox();
-
-        AddContextRow(_contextTable, "会话存储目录", _conversationDirBox, 0,
-            "保存本地会话、历史提示词和生成记录的位置。切换目录后，新旧会话不会自动合并。",
-            1);
-        _contextTable.Controls.Add(_conversationBrowseBtn, 2, 0);
-        AddContextRow(_contextTable, "活跃消息数", _maxActiveMessagesNumeric, 1,
-            "当前会话中直接参与上下文分析的最近消息数量。数值越大，连续性越强，但上下文也更容易变杂。");
-        AddContextRow(_contextTable, "压缩触发阈值", _compressionTriggerNumeric, 2,
-            "当消息数量超过该值时，较早历史会被压缩成摘要，避免会话无限变长。");
-        AddContextRow(_contextTable, "保留最近消息", _keepRecentNumeric, 3,
-            "压缩历史时始终保留的最近消息数量。建议小于压缩触发阈值。");
-        AddContextRow(_contextTable, "最近提示词数", _maxContextPromptsNumeric, 4,
-            "允许注入到上下文中的最近用户提示词数量。设为 0 时不注入最近提示词。");
-        AddContextRow(_contextTable, "最多历史参考图", _maxContextImagesNumeric, 5,
-            "自动附加历史生成图的上限。gpt-image-2 会处理图像输入，数量越多成本和耗时越高。");
-        AddContextRow(_contextTable, "自动附图阈值", _contextAutoAttachThresholdNumeric, 6,
-            "上下文决策置信度达到该值才自动附加历史图。越高越保守，越低越积极。");
-        AddContextRow(_contextTable, "智能引用历史图", _referenceDetectionCheck, 7,
-            "开启后，系统会判断本轮请求是否依赖最近生成图，并在需要时自动附加历史图作为参考图。");
-        AddContextRow(_contextTable, "提示词上下文", _promptEnhancementCheck, 8,
-            "开启后，系统会把会话摘要和最近提示词整理进请求，帮助模型理解连续创作意图。");
-        AddContextRow(_contextTable, "显示决策提示", _showContextDecisionHintCheck, 9,
-            "生成前显示本次是否使用了历史图或文本上下文，便于理解自动行为。");
-        AddContextRow(_contextTable, "附件叠加历史图", _allowHistoryImagesWithManualAttachmentsCheck, 10,
-            "开启后，即使用户手动上传了图片，系统也可能额外附加相关历史图。默认关闭，避免混入不需要的参考图。");
-
-        var helpLabel = new Label
-        {
-            Text = "智能上下文会根据本轮提示词、最近提示词、历史生成图和手动附件自动判断是否需要补充上下文。",
-            Dock = DockStyle.Fill,
-            ForeColor = SystemColors.GrayText,
-            TextAlign = ContentAlignment.MiddleLeft,
-        };
-        _contextTable.SetColumnSpan(helpLabel, 4);
-        _contextTable.Controls.Add(helpLabel, 0, 11);
-
-        _contextScrollPanel.Controls.Add(_contextTable);
-        _contextTab.Controls.Add(_contextScrollPanel);
-        tabs.Controls.Add(_contextTab);
-    }
-
-    private static NumericUpDown CreateContextNumeric(int min, int max, int value) => new()
-    {
-        Minimum = min,
-        Maximum = max,
-        Value = value,
-        Size = new Size(96, 24),
-        Anchor = AnchorStyles.Left,
-    };
-
-    private static CheckBox CreateContextCheckBox() => new()
-    {
-        Text = "启用",
-        Anchor = AnchorStyles.Left,
-        AutoSize = true,
-    };
-
-    private void AddContextRow(
-        TableLayoutPanel table,
-        string labelText,
-        Control control,
-        int row,
-        string helpText,
-        int controlColumnSpan = 2)
-    {
-        var label = new Label
-        {
-            Text = labelText,
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleLeft,
-        };
-        var help = new Label
-        {
-            Text = "?",
-            Tag = "context-help",
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            Cursor = Cursors.Help,
-            ForeColor = Color.FromArgb(37, 99, 235),
-        };
-        _contextToolTip.SetToolTip(label, helpText);
-        _contextToolTip.SetToolTip(control, helpText);
-        _contextToolTip.SetToolTip(help, helpText);
-
-        table.Controls.Add(label, 0, row);
-        table.Controls.Add(control, 1, row);
-        if (controlColumnSpan > 1)
-            table.SetColumnSpan(control, controlColumnSpan);
-        table.Controls.Add(help, 3, row);
-    }
-
-    private void ApplyBrowseButtonStyle(Button button)
-    {
-        button.FlatStyle = browseBtn.FlatStyle;
-        button.BackColor = browseBtn.BackColor;
-        button.ForeColor = browseBtn.ForeColor;
-        button.Font = browseBtn.Font;
-        button.TextAlign = browseBtn.TextAlign;
-        button.UseVisualStyleBackColor = browseBtn.UseVisualStyleBackColor;
-        button.FlatAppearance.BorderSize = browseBtn.FlatAppearance.BorderSize;
-    }
-
-    private void FitInitialWindowToScreen()
-    {
-        var workArea = Screen.FromControl(this).WorkingArea;
-        var maxWidth = Math.Max(MinimumSize.Width, (int)(workArea.Width * 0.9F));
-        var maxHeight = Math.Max(MinimumSize.Height, (int)(workArea.Height * 0.9F));
-        var targetSize = new Size(Math.Min(Width, maxWidth), Math.Min(Height, maxHeight));
-
-        if (targetSize != Size)
-            Size = targetSize;
-    }
-
-    private void HandleResponsiveResize()
-    {
-        if (WindowState == FormWindowState.Minimized)
-        {
-            _wasMinimized = true;
-            _resizeDebounceTimer.Stop();
-            return;
-        }
-
-        _resizeDebounceTimer.Stop();
-        _resizeDebounceTimer.Start();
-    }
-
-    private void FlushResponsiveResize()
-    {
-        _resizeDebounceTimer.Stop();
-        if (IsDisposed || WindowState == FormWindowState.Minimized)
-            return;
-
-        var restoringFromMinimized = _wasMinimized;
-        ApplyResponsiveLayout();
-
-        if (restoringFromMinimized)
-        {
-            _wasMinimized = false;
-            QueueRestoreLayoutRefresh();
-        }
-    }
-
-    private void QueueRestoreLayoutRefresh()
-    {
-        if (_restoreLayoutQueued || !IsHandleCreated || IsDisposed)
-            return;
-
-        _restoreLayoutQueued = true;
-        BeginInvoke(() =>
-        {
-            _restoreLayoutQueued = false;
-            if (IsDisposed || WindowState == FormWindowState.Minimized)
-                return;
-
-            ApplyResponsiveLayout();
-            ForceTextLayoutRefresh(this);
-            Invalidate(true);
-        });
-    }
-
-    private void ApplyResponsiveLayout()
-    {
-        if (_isApplyingResponsiveLayout
-            || WindowState == FormWindowState.Minimized
-            || ClientSize.Width <= 0
-            || ClientSize.Height <= 0)
-            return;
-
-        _isApplyingResponsiveLayout = true;
-        try
-        {
-            _uiScale = CalculateUiScale();
-            var logicalClientSize = GetLogicalClientSize();
-            var compact = logicalClientSize.Width < 560 || logicalClientSize.Height < 400;
-            var padding = ScaleValue(compact ? 12 : 20);
-            var tabPadding = ScaleValue(compact ? 8 : 12);
-            var rowHeight = ScaleValue(compact ? 38 : 44);
-
-            SuspendLayout();
-            tabs.SuspendLayout();
-            basicTable.SuspendLayout();
-            sizeTable.SuspendLayout();
-            formatTable.SuspendLayout();
-            _contextScrollPanel.SuspendLayout();
-            _contextTable.SuspendLayout();
-            buttonPanel.SuspendLayout();
-
-            Padding = new Padding(padding);
-            basicTab.Padding = new Padding(tabPadding);
-            sizeTab.Padding = new Padding(tabPadding);
-            formatTab.Padding = new Padding(tabPadding);
-            _contextTab.Padding = new Padding(tabPadding);
-
-            SetColumnWidth(basicTable, 0, compact ? 92 : 110);
-            SetColumnWidth(basicTable, 2, compact ? 68 : 86);
-            SetColumnWidth(_contextTable, 0, compact ? 112 : 150);
-            SetColumnWidth(_contextTable, 2, compact ? 68 : 86);
-            SetColumnWidth(_contextTable, 3, compact ? 28 : 32);
-            SetColumnWidth(sizeTable, 0, compact ? 92 : 110);
-            SetColumnWidth(sizeTable, 2, compact ? 88 : 110);
-            SetColumnWidth(formatTable, 0, compact ? 98 : 120);
-
-            SetAbsoluteRows(basicTable, 5, rowHeight);
-            SetAbsoluteRows(_contextTable, 11, compact ? ScaleValue(38) : rowHeight);
-            _contextTable.RowStyles[11].SizeType = SizeType.Absolute;
-            _contextTable.RowStyles[11].Height = ScaleValue(compact ? 48 : 54);
-            SetAbsoluteRows(sizeTable, 6, ScaleValue(compact ? 36 : 40));
-            SetAbsoluteRows(formatTable, 6, rowHeight);
-            formatTable.RowStyles[6].SizeType = SizeType.Absolute;
-            formatTable.RowStyles[6].Height = ScaleValue(compact ? 76 : 72);
-            var contextBottomGap = ScaleValue(compact ? 10 : 12);
-            _contextScrollPanel.AutoScrollMargin = new Size(0, contextBottomGap);
-            _contextScrollPanel.Padding = new Padding(0, 0, 0, contextBottomGap);
-
-            ApplyTableControlSpacing(basicTable, rowHeight, compact);
-            ApplyTableControlSpacing(_contextTable, compact ? ScaleValue(38) : rowHeight, compact);
-            ApplyTableControlSpacing(sizeTable, ScaleValue(compact ? 36 : 40), compact);
-            ApplyTableControlSpacing(formatTable, rowHeight, compact);
-
-            _sizeHelpLabel.MaximumSize = new Size(Math.Max(ScaleValue(240), sizeTable.ClientSize.Width - ScaleValue(12)), 0);
-
-            buttonPanel.Height = ScaleValue(compact ? 40 : 46);
-            saveBtn.Size = new Size(ScaleValue(compact ? 82 : 96), ScaleValue(compact ? 30 : 34));
-            cancelBtn.Size = saveBtn.Size;
-            cancelBtn.Margin = new Padding(0, 0, ScaleValue(compact ? 8 : 12), 0);
-            saveBtn.Font = UiFont(compact ? 9F : 10F);
-            cancelBtn.Font = UiFont(compact ? 9F : 10F);
-            browseBtn.Font = UiFont(compact ? 9F : 10F);
-            _conversationBrowseBtn.Font = UiFont(compact ? 9F : 10F);
-            showKeyBtn.Size = new Size(showKeyBtn.Width, ScaleValue(compact ? 28 : 30));
-            UpdateShowKeyIcon();
-
-            var buttonRadius = ScaleValue(8);
-            UpdateButtonRegion(showKeyBtn, buttonRadius);
-            UpdateButtonRegion(browseBtn, buttonRadius);
-            UpdateButtonRegion(_conversationBrowseBtn, buttonRadius);
-            UpdateButtonRegion(saveBtn, buttonRadius);
-            UpdateButtonRegion(cancelBtn, buttonRadius);
-        }
-        finally
-        {
-            buttonPanel.ResumeLayout(true);
-            _contextTable.ResumeLayout(true);
-            _contextScrollPanel.ResumeLayout(true);
-            formatTable.ResumeLayout(true);
-            sizeTable.ResumeLayout(true);
-            basicTable.ResumeLayout(true);
-            tabs.ResumeLayout(true);
-            ResumeLayout(true);
-            _isApplyingResponsiveLayout = false;
-        }
-    }
-
-    private float CalculateUiScale()
-    {
-        var logicalClientSize = GetLogicalClientSize();
-        var widthScale = logicalClientSize.Width / ReferenceWidth;
-        var heightScale = logicalClientSize.Height / ReferenceHeight;
-        return Clamp(Math.Min(widthScale, heightScale), MinUiScale, MaxUiScale);
-    }
-
-    private float DpiScale => Math.Max(DesignDpi, DeviceDpi) / DesignDpi;
-
-    private SizeF GetLogicalClientSize() =>
-        new(ClientSize.Width / DpiScale, ClientSize.Height / DpiScale);
-
-    private int ScaleValue(int value) =>
-        Math.Max(1, (int)Math.Round(value * _uiScale * DpiScale));
-
-    private Font UiFont(float size, FontStyle style = FontStyle.Regular)
-    {
-        var fontSize = Math.Max(7.5F, size * _uiScale);
-        var sizeKey = (int)Math.Round(fontSize * 100F);
-        var key = (sizeKey, style);
-        if (_fontCache.TryGetValue(key, out var font))
-            return font;
-
-        font = new Font("Microsoft YaHei UI", sizeKey / 100F, style);
-        _fontCache[key] = font;
-        return font;
-    }
-
-    private void DisposeCachedResources()
-    {
-        _resizeDebounceTimer.Dispose();
-
-        foreach (var font in _fontCache.Values)
-            font.Dispose();
-
-        _fontCache.Clear();
-    }
-
-    private void SetColumnWidth(TableLayoutPanel table, int columnIndex, int width)
-    {
-        table.ColumnStyles[columnIndex].SizeType = SizeType.Absolute;
-        table.ColumnStyles[columnIndex].Width = ScaleValue(width);
-    }
-
-    private void SetAbsoluteRows(TableLayoutPanel table, int fixedRowCount, int height)
-    {
-        for (var i = 0; i < fixedRowCount && i < table.RowStyles.Count; i++)
-        {
-            table.RowStyles[i].SizeType = SizeType.Absolute;
-            table.RowStyles[i].Height = height;
-        }
-    }
-
-    private void ApplyTableControlSpacing(TableLayoutPanel table, int rowHeight, bool compact)
-    {
-        var verticalMargin = ScaleValue(compact ? 5 : 7);
-        var rightMargin = ScaleValue(compact ? 6 : 8);
-
-        foreach (Control control in table.Controls)
-        {
-            if (control is Label label)
-            {
-                label.Height = rowHeight;
-                label.Font = Equals(label.Tag, "context-help")
-                    ? UiFont(compact ? 8.5F : 9F, FontStyle.Bold)
-                    : label == lblConcurrencyHint
-                    ? UiFont(8F)
-                    : UiFont(compact ? 9F : 10F);
-                continue;
-            }
-
-            control.Font = UiFont(compact ? 9F : 10F);
-            if (control is Button button)
-                button.TextAlign = ContentAlignment.MiddleCenter;
-
-            var column = table.GetColumn(control);
-            var trailingMargin = column == table.ColumnCount - 1 ? 0 : rightMargin;
-            control.Margin = new Padding(0, verticalMargin, trailingMargin, verticalMargin);
-        }
-    }
-
-    private static decimal Clamp(int value, decimal min, decimal max) =>
-        Math.Min(max, Math.Max(min, value));
-
-    private static decimal Clamp(decimal value, decimal min, decimal max) =>
-        Math.Min(max, Math.Max(min, value));
-
-    private static int Clamp(int value, int min, int max) =>
-        Math.Min(max, Math.Max(min, value));
-
-    private static float Clamp(float value, float min, float max) =>
-        Math.Min(max, Math.Max(min, value));
-
     private void UpdateShowKeyIcon()
     {
         SetScaledButtonImage(
             showKeyBtn,
             _apiKeyBox.UseSystemPasswordChar ? "visibility-24.png" : "visibility-off-24.png",
             20);
+        showKeyBtn.Text = "";
+        showKeyBtn.ImageAlign = ContentAlignment.MiddleCenter;
+        showKeyBtn.TextImageRelation = TextImageRelation.Overlay;
+        showKeyBtn.Padding = Padding.Empty;
+        _buttonToolTip?.SetToolTip(showKeyBtn, _apiKeyBox.UseSystemPasswordChar ? T("ShowApiKey") : T("HideApiKey"));
     }
 
     private void SetScaledButtonImage(Button button, string fileName, int logicalSize)
@@ -715,31 +313,33 @@ internal partial class SettingsForm : Form
             AllowHistoryImagesWithManualAttachments = _allowHistoryImagesWithManualAttachmentsCheck.Checked,
             EnableReferenceDetection = _referenceDetectionCheck.Checked,
             EnablePromptEnhancement = _promptEnhancementCheck.Checked,
+            Theme = SelectedTheme,
+            Language = SelectedLanguage,
         };
 
         if (string.IsNullOrWhiteSpace(Result.BaseUrl))
         {
-            MessageBox.Show(this, "API 地址不能为空。", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, T("ApiUrlRequired"), T("ValidationFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
         if (string.IsNullOrWhiteSpace(Result.ApiKey))
         {
-            MessageBox.Show(this, "API Key 不能为空。", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, T("ApiKeyRequired"), T("ValidationFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
         if (string.IsNullOrWhiteSpace(Result.Model))
         {
-            MessageBox.Show(this, "模型名称不能为空。", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, T("ModelRequired"), T("ValidationFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
         if (!TryValidateWritableDirectory(Result.OutputDir, Path.GetTempPath(), out var outputDirError))
         {
-            MessageBox.Show(this, $"输出目录不可用：{outputDirError}", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, string.Format(T("OutputDirInvalid"), outputDirError), T("ValidationFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
         if (!TryValidateWritableDirectory(Result.ConversationStoreDir, "conversations", out var conversationDirError))
         {
-            MessageBox.Show(this, $"会话存储目录不可用：{conversationDirError}", "验证失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, string.Format(T("ConversationDirInvalid"), conversationDirError), T("ValidationFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
