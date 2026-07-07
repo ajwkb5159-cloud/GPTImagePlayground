@@ -297,7 +297,15 @@ internal partial class SettingsForm
 
     private void AdjustHeightForSelectedTab(int requiredHelpTableHeight)
     {
-        var currentTableHeight = Math.Max(sizeTable.ClientSize.Height, formatTable.ClientSize.Height);
+        var displayRect = tabs.DisplayRectangle;
+        if (displayRect.Height <= 0)
+            return;
+
+        // All tab pages share the same padding (set in ApplyResponsiveLayout) and same display area,
+        // so the table client height derived from DisplayRectangle is always accurate
+        // regardless of which tab is currently selected or whether SuspendLayout is active.
+        var tabPaddingVertical = basicTab.Padding.Vertical;
+        var currentTableHeight = displayRect.Height - tabPaddingVertical;
         if (currentTableHeight <= 0)
             return;
 
