@@ -95,8 +95,12 @@ internal partial class SettingsForm
             basicTable.SuspendLayout();
             sizeTable.SuspendLayout();
             formatTable.SuspendLayout();
+            _basicScrollPanel.SuspendLayout();
+            _sizeScrollPanel.SuspendLayout();
+            _formatScrollPanel.SuspendLayout();
             _contextScrollPanel.SuspendLayout();
             _contextTable.SuspendLayout();
+            _appearanceScrollPanel.SuspendLayout();
             _appearanceTable.SuspendLayout();
             buttonPanel.SuspendLayout();
 
@@ -117,7 +121,7 @@ internal partial class SettingsForm
             SetColumnWidth(sizeTable, 2, english ? compact ? 110 : 128 : compact ? 88 : 110);
             SetColumnWidth(formatTable, 0, english ? compact ? 132 : 150 : compact ? 98 : 120);
 
-            SetAbsoluteRows(basicTable, 5, rowHeight);
+            SetAbsoluteRows(basicTable, 6, rowHeight);
             SetAbsoluteRows(_appearanceTable, 2, rowHeight);
             SetAbsoluteRows(_contextTable, 11, compact ? ScaleValue(38) : rowHeight);
             _contextTable.RowStyles[11].SizeType = SizeType.Absolute;
@@ -133,17 +137,6 @@ internal partial class SettingsForm
             ApplyTableControlSpacing(_contextTable, compact ? ScaleValue(38) : rowHeight, compact);
             ApplyTableControlSpacing(sizeTable, ScaleValue(compact ? 36 : 40), compact);
             ApplyTableControlSpacing(formatTable, rowHeight, compact);
-
-            var sizeHelpRowHeight = MeasureHelpLabelRowHeight(_sizeHelpLabel, sizeTable, compact ? 34 : 40, compact);
-            var formatHelpRowHeight = MeasureHelpLabelRowHeight(lblConcurrencyHint, formatTable, compact ? 34 : 40, compact);
-            sizeTable.RowStyles[6].SizeType = SizeType.Absolute;
-            sizeTable.RowStyles[6].Height = sizeHelpRowHeight;
-            formatTable.RowStyles[6].SizeType = SizeType.Absolute;
-            formatTable.RowStyles[6].Height = formatHelpRowHeight;
-            AdjustHeightForSelectedTab(
-                Math.Max(
-                    GetAbsoluteRowsHeight(sizeTable, 7),
-                    GetAbsoluteRowsHeight(formatTable, 7)));
 
             buttonPanel.Height = ScaleValue(compact ? 40 : 46);
             saveBtn.Size = new Size(ScaleValue(compact ? 82 : 96), ScaleValue(compact ? 30 : 34));
@@ -169,8 +162,12 @@ internal partial class SettingsForm
         {
             buttonPanel.ResumeLayout(true);
             _appearanceTable.ResumeLayout(true);
+            _appearanceScrollPanel.ResumeLayout(true);
             _contextTable.ResumeLayout(true);
             _contextScrollPanel.ResumeLayout(true);
+            _formatScrollPanel.ResumeLayout(true);
+            _sizeScrollPanel.ResumeLayout(true);
+            _basicScrollPanel.ResumeLayout(true);
             formatTable.ResumeLayout(true);
             sizeTable.ResumeLayout(true);
             basicTable.ResumeLayout(true);
@@ -248,6 +245,10 @@ internal partial class SettingsForm
                     label.Font = label == lblConcurrencyHint
                         ? UiFont(8F)
                         : UiFont(compact ? 9F : 10F);
+                    var availableWidth = Math.Max(
+                        ScaleValue(240),
+                        table.ClientSize.Width - ScaleValue(compact ? 8 : 12));
+                    label.MaximumSize = new Size(availableWidth, 0);
                     continue;
                 }
 
@@ -270,67 +271,10 @@ internal partial class SettingsForm
         }
     }
 
-    private int MeasureHelpLabelRowHeight(Label label, TableLayoutPanel table, int minLogicalHeight, bool compact)
-    {
-        var availableWidth = Math.Max(
-            ScaleValue(240),
-            table.ClientSize.Width - ScaleValue(compact ? 8 : 12));
-        label.MaximumSize = new Size(availableWidth, 0);
-
-        var measured = TextRenderer.MeasureText(
-            label.Text,
-            label.Font,
-            new Size(availableWidth, int.MaxValue),
-            TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl | TextFormatFlags.NoPadding);
-
-        return Math.Max(ScaleValue(minLogicalHeight), measured.Height + ScaleValue(compact ? 14 : 18));
-    }
-
-    private static int GetAbsoluteRowsHeight(TableLayoutPanel table, int rowCount)
-    {
-        var height = 0;
-        for (var i = 0; i < rowCount && i < table.RowStyles.Count; i++)
-            height += (int)Math.Ceiling(table.RowStyles[i].Height);
-
-        return height;
-    }
-
-    private void AdjustHeightForSelectedTab(int requiredHelpTableHeight)
-    {
-        var displayRect = tabs.DisplayRectangle;
-        if (displayRect.Height <= 0)
-            return;
-
-        // All tab pages share the same padding (set in ApplyResponsiveLayout) and same display area,
-        // so the table client height derived from DisplayRectangle is always accurate
-        // regardless of which tab is currently selected or whether SuspendLayout is active.
-        var tabPaddingVertical = basicTab.Padding.Vertical;
-        var currentTableHeight = displayRect.Height - tabPaddingVertical;
-        if (currentTableHeight <= 0)
-            return;
-
-        var nonTableHeight = ClientSize.Height - currentTableHeight;
-        var baseClientHeight = Math.Max(
-            MinimumSize.Height - (Height - ClientSize.Height),
-            ScaleValue(ReferenceHeight));
-        var targetClientHeight = tabs.SelectedTab == sizeTab || tabs.SelectedTab == formatTab
-            ? Math.Max(baseClientHeight, nonTableHeight + requiredHelpTableHeight)
-            : baseClientHeight;
-        var workArea = Screen.FromControl(this).WorkingArea;
-        var maxClientHeight = Math.Max(baseClientHeight, (int)(workArea.Height * 0.9F) - (Height - ClientSize.Height));
-        targetClientHeight = Clamp(targetClientHeight, baseClientHeight, maxClientHeight);
-
-        if (Math.Abs(ClientSize.Height - targetClientHeight) > ScaleValue(2))
-            ClientSize = new Size(ClientSize.Width, targetClientHeight);
-    }
-
     private static decimal Clamp(int value, decimal min, decimal max) =>
         Math.Min(max, Math.Max(min, value));
 
     private static decimal Clamp(decimal value, decimal min, decimal max) =>
-        Math.Min(max, Math.Max(min, value));
-
-    private static int Clamp(int value, int min, int max) =>
         Math.Min(max, Math.Max(min, value));
 
     private static float Clamp(float value, float min, float max) =>

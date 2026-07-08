@@ -6,6 +6,7 @@ internal partial class SettingsForm
 {
     private TabPage _appearanceTab = null!;
     private TableLayoutPanel _appearanceTable = null!;
+    private Panel _appearanceScrollPanel = null!;
     private ComboBox _themeBox = null!;
     private ComboBox _languageBox = null!;
     private Label _themeLabel = null!;
@@ -32,7 +33,7 @@ internal partial class SettingsForm
         {
             Dock = DockStyle.Top,
             ColumnCount = 2,
-            RowCount = 3,
+            RowCount = 2,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
         };
@@ -40,7 +41,12 @@ internal partial class SettingsForm
         _appearanceTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         _appearanceTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
         _appearanceTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
-        _appearanceTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        _appearanceScrollPanel = new Panel
+        {
+            AutoScroll = true,
+            Dock = DockStyle.Fill,
+        };
 
         _themeLabel = CreateAppearanceLabel();
         _languageLabel = CreateAppearanceLabel();
@@ -55,7 +61,8 @@ internal partial class SettingsForm
         _themeBox.SelectedIndexChanged += (_, _) => PreviewAppearanceChanges();
         _languageBox.SelectedIndexChanged += (_, _) => PreviewAppearanceChanges();
 
-        _appearanceTab.Controls.Add(_appearanceTable);
+        _appearanceScrollPanel.Controls.Add(_appearanceTable);
+        _appearanceTab.Controls.Add(_appearanceScrollPanel);
         tabs.Controls.Add(_appearanceTab);
     }
 

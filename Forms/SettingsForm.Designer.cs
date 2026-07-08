@@ -123,6 +123,9 @@ partial class SettingsForm
         buttonPanel = new FlowLayoutPanel();
         saveBtn = new Button();
         cancelBtn = new Button();
+        _basicScrollPanel = new Panel();
+        _sizeScrollPanel = new Panel();
+        _formatScrollPanel = new Panel();
         tabs.SuspendLayout();
         basicTab.SuspendLayout();
         sizeTab.SuspendLayout();
@@ -148,7 +151,7 @@ partial class SettingsForm
         tabs.Size = new Size(604, 346);
         tabs.TabIndex = 0;
 
-        basicTab.Controls.Add(basicTable);
+        basicTab.Controls.Add(_basicScrollPanel);
         basicTab.Location = new Point(4, 26);
         basicTab.Name = "basicTab";
         basicTab.Padding = new Padding(12);
@@ -157,6 +160,13 @@ partial class SettingsForm
         basicTab.Text = "基础";
         basicTab.UseVisualStyleBackColor = true;
 
+        _basicScrollPanel.AutoScroll = true;
+        _basicScrollPanel.Dock = DockStyle.Fill;
+        _basicScrollPanel.Name = "_basicScrollPanel";
+
+        _basicScrollPanel.Controls.Add(basicTable);
+        basicTable.AutoSize = true;
+        basicTable.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         basicTable.ColumnCount = 3;
         basicTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
         basicTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
@@ -175,14 +185,13 @@ partial class SettingsForm
         basicTable.Controls.Add(_timeoutNumeric, 1, 4);
         basicTable.Controls.Add(lblVerifySsl, 0, 5);
         basicTable.Controls.Add(_verifySslCertificateCheck, 1, 5);
-        basicTable.Dock = DockStyle.Fill;
-        basicTable.Location = new Point(12, 12);
+        basicTable.Dock = DockStyle.Top;
+        basicTable.Location = new Point(0, 0);
         basicTable.Name = "basicTable";
-        basicTable.RowCount = 7;
+        basicTable.RowCount = 6;
         for (var i = 0; i < 6; i++)
             basicTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
-        basicTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        basicTable.Size = new Size(572, 292);
+        basicTable.Size = new Size(572, 264);
         basicTable.TabIndex = 0;
 
         lblApiUrl.Location = new Point(3, 0);
@@ -293,7 +302,7 @@ partial class SettingsForm
         _verifySslCertificateCheck.Text = "true";
         _verifySslCertificateCheck.UseVisualStyleBackColor = true;
 
-        sizeTab.Controls.Add(sizeTable);
+        sizeTab.Controls.Add(_sizeScrollPanel);
         sizeTab.Location = new Point(4, 26);
         sizeTab.Name = "sizeTab";
         sizeTab.Padding = new Padding(12);
@@ -302,6 +311,13 @@ partial class SettingsForm
         sizeTab.Text = "尺寸";
         sizeTab.UseVisualStyleBackColor = true;
 
+        _sizeScrollPanel.AutoScroll = true;
+        _sizeScrollPanel.Dock = DockStyle.Fill;
+        _sizeScrollPanel.Name = "_sizeScrollPanel";
+
+        _sizeScrollPanel.Controls.Add(sizeTable);
+        sizeTable.AutoSize = true;
+        sizeTable.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         sizeTable.ColumnCount = 4;
         sizeTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
         sizeTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
@@ -319,14 +335,14 @@ partial class SettingsForm
         sizeTable.Controls.Add(lblCustomHeight, 1, 4);
         sizeTable.Controls.Add(_customHeightNumeric, 2, 4);
         sizeTable.Controls.Add(_sizeHelpLabel, 0, 6);
-        sizeTable.Dock = DockStyle.Fill;
-        sizeTable.Location = new Point(12, 12);
+        sizeTable.Dock = DockStyle.Top;
+        sizeTable.Location = new Point(0, 0);
         sizeTable.Name = "sizeTable";
         sizeTable.RowCount = 7;
         for (var i = 0; i < 6; i++)
             sizeTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
-        sizeTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        sizeTable.Size = new Size(572, 292);
+        sizeTable.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        sizeTable.Size = new Size(572, 240);
         sizeTable.TabIndex = 0;
 
         _sizeAutoRadio.AutoSize = true;
@@ -429,7 +445,7 @@ partial class SettingsForm
         _sizeHelpLabel.Size = new Size(532, 34);
         _sizeHelpLabel.Text = "由于模型限制，最终输出会自动规整到合法尺寸：宽高均为16倍数，最大边长3840px，宽高比不超过3:1，总像素限制为655360-8294400。";
 
-        formatTab.Controls.Add(formatTable);
+        formatTab.Controls.Add(_formatScrollPanel);
         formatTab.Location = new Point(4, 26);
         formatTab.Name = "formatTab";
         formatTab.Padding = new Padding(12);
@@ -438,6 +454,13 @@ partial class SettingsForm
         formatTab.Text = "格式";
         formatTab.UseVisualStyleBackColor = true;
 
+        _formatScrollPanel.AutoScroll = true;
+        _formatScrollPanel.Dock = DockStyle.Fill;
+        _formatScrollPanel.Name = "_formatScrollPanel";
+
+        _formatScrollPanel.Controls.Add(formatTable);
+        formatTable.AutoSize = true;
+        formatTable.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         formatTable.ColumnCount = 2;
         formatTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120F));
         formatTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
@@ -454,15 +477,14 @@ partial class SettingsForm
         formatTable.Controls.Add(lblConcurrency, 0, 5);
         formatTable.Controls.Add(_concurrencyNumeric, 1, 5);
         formatTable.Controls.Add(lblConcurrencyHint, 0, 6);
-        formatTable.Dock = DockStyle.Fill;
-        formatTable.Location = new Point(12, 12);
+        formatTable.Dock = DockStyle.Top;
+        formatTable.Location = new Point(0, 0);
         formatTable.Name = "formatTable";
-        formatTable.RowCount = 8;
+        formatTable.RowCount = 7;
         for (var i = 0; i < 6; i++)
             formatTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
-        formatTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));
-        formatTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        formatTable.Size = new Size(572, 292);
+        formatTable.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        formatTable.Size = new Size(572, 264);
         formatTable.TabIndex = 0;
 
         lblOutputFormat.Location = new Point(3, 0);
@@ -560,6 +582,7 @@ partial class SettingsForm
         _concurrencyNumeric.Value = new decimal(new int[] { 4, 0, 0, 0 });
 
         formatTable.SetColumnSpan(lblConcurrencyHint, 2);
+        lblConcurrencyHint.AutoSize = true;
         lblConcurrencyHint.Dock = DockStyle.Fill;
         lblConcurrencyHint.Font = new Font("Microsoft YaHei UI", 8F);
         lblConcurrencyHint.ForeColor = SystemColors.GrayText;
@@ -657,4 +680,7 @@ partial class SettingsForm
     private Label lblConcurrent;
     private Label lblConcurrency;
     private Label lblConcurrencyHint;
+    private Panel _basicScrollPanel;
+    private Panel _sizeScrollPanel;
+    private Panel _formatScrollPanel;
 }
