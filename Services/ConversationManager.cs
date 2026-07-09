@@ -7,7 +7,7 @@ internal class ConversationManager
     private readonly ConversationStore _store;
     private readonly ContextCache _cache;
     private readonly ContextCompressor _compressor;
-    private readonly AppConfig _config;
+    private AppConfig _config;
     private readonly List<ConversationMeta> _conversationList = [];
 
     public ConversationManager(
@@ -25,6 +25,19 @@ internal class ConversationManager
     public IReadOnlyList<ConversationMeta> ConversationList => _conversationList;
     public Conversation? ActiveConversation { get; private set; }
     public string? ActiveConversationId => ActiveConversation?.Id;
+
+    /// <summary>
+    /// Replaces the config reference used for future context-window decisions and
+    /// refreshes the active conversation's context config in place. Does not reload
+    /// from disk or touch messages, so settings changes stay decoupled from
+    /// generation and conversation switching.
+    /// </summary>
+    public void UpdateConfig(AppConfig config)
+    {
+        _config = config;
+        if (ActiveConversation != null)
+            ApplyConfigToConversation(ActiveConversation);
+    }
 
     public async Task InitializeAsync()
     {
@@ -198,6 +211,17 @@ internal class ConversationManager
     private void EnsureConversationConfig(Conversation conversation)
     {
         conversation.ContextConfig ??= CreateContextConfigFromAppConfig();
+        ApplyConfigToConversation(conversation);
+    }
+
+    private void ApplyConfigToConversation(Conversation conversation)
+    {
+        if (conversation.ContextConfig == null)
+        {
+            conversation.ContextConfig = CreateContextConfigFromAppConfig();
+            return;
+        }
+
         conversation.ContextConfig.MaxActiveMessages = Math.Max(1, _config.MaxActiveMessages);
         conversation.ContextConfig.CompressionTriggerCount = Math.Max(2, _config.CompressionTriggerCount);
         conversation.ContextConfig.KeepRecentCount = Math.Max(1, _config.KeepRecentCount);

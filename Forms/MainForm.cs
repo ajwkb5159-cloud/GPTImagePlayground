@@ -39,6 +39,7 @@ internal partial class MainForm : Form
     private bool _isApplyingResponsiveLayout;
     private bool _wasMinimized;
     private bool _restoreLayoutQueued;
+    private bool _chatUiDirtyWhileMinimized;
     private bool _isClosing;
     private int _lastChatScrollY;
     private bool _lastChatWasAtBottom = true;
@@ -105,8 +106,6 @@ internal partial class MainForm : Form
         };
         chatContainer.MouseWheel += ChatContainer_MouseWheel;
         _chatPanel.MouseWheel += ChatContainer_MouseWheel;
-
-        _loadingOverlay.SizeChanged += (_, _) => CenterLoadingLabel();
 
         // ── Global key bindings ──
         KeyDown += (_, e) =>
@@ -206,11 +205,29 @@ internal partial class MainForm : Form
             if (IsDisposed || WindowState == FormWindowState.Minimized)
                 return;
 
+            var chatUiWasDirty = _chatUiDirtyWhileMinimized;
+            if (chatUiWasDirty)
+            {
+                _chatUiDirtyWhileMinimized = false;
+                LoadActiveConversationMessages();
+            }
+
             ApplyResponsiveLayout();
             ForceTextLayoutRefresh(this);
-            FinalizeRestoreChatScroll(targetToBottom, targetScrollY);
+            FinalizeRestoreChatScroll(
+                chatUiWasDirty || targetToBottom,
+                targetScrollY);
             Invalidate(true);
         });
+    }
+
+    private bool DeferChatUiUpdateWhileMinimized()
+    {
+        if (WindowState != FormWindowState.Minimized)
+            return false;
+
+        _chatUiDirtyWhileMinimized = true;
+        return true;
     }
 
     private void ApplyResponsiveLayout()
@@ -283,7 +300,6 @@ internal partial class MainForm : Form
             titleLabel.Size = new Size(Math.Max(0, titlePanel.Width - titleLabel.Left), topBar.Height);
 
             chatContainer.Padding = new Padding(ScaleValue(compact ? 8 : 12));
-            _loadingLabel.Font = UiFont(compact ? 12F : 14F, FontStyle.Bold);
 
             inputPanel.Padding = compact
                 ? new Padding(ScaleValue(10), ScaleValue(6), ScaleValue(10), ScaleValue(10))
@@ -340,7 +356,6 @@ internal partial class MainForm : Form
 
             UpdateChatPanelBounds();
             ReflowChatRows();
-            CenterLoadingLabel();
         }
         finally
         {
@@ -400,6 +415,7 @@ internal partial class MainForm : Form
     private void DisposeCachedResources()
     {
         _resizeDebounceTimer.Dispose();
+        _conversationGate.Dispose();
         DisposePendingResponses();
         ClearThumbnailCache();
 
@@ -494,20 +510,39 @@ internal partial class MainForm : Form
         root.Invalidate();
     }
 
-    private void SettingsBtn_Click(object? sender, EventArgs e)
+    private async void SettingsBtn_Click(object? sender, EventArgs e)
     {
         using var dlg = new SettingsForm(_config);
-        if (dlg.ShowDialog(this) == DialogResult.OK)
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        var previousStoreDir = _configManager.ResolveConversationStoreDir(_config);
+        _config = dlg.Result;
+        _apiService = new ImageApiService(_config);
+        _configManager.Save(_config);
+        ApplyLocalization();
+        ApplyTheme();
+        ApplyResponsiveLayout();
+
+        var newStoreDir = _configManager.ResolveConversationStoreDir(_config);
+        var storeDirChanged = !string.Equals(
+            previousStoreDir, newStoreDir, StringComparison.OrdinalIgnoreCase);
+
+        if (storeDirChanged)
         {
-            _config = dlg.Result;
-            _apiService = new ImageApiService(_config);
-            _configManager.Save(_config);
-            ApplyLocalization();
-            ApplyTheme();
-            ApplyResponsiveLayout();
-            _ = InitializeConversationsAsync();
-            _promptBox.Focus();
+            // Only a store-dir change requires rebuilding from disk. Route through
+            // the conversation gate so it can't interleave with switch/new/delete.
+            await RunConversationActionAsync(RebuildConversationManagerAsync, "初始化会话失败");
         }
+        else
+        {
+            // Same store: keep the live manager (and any in-flight generation)
+            // untouched; just hand it the new config for future decisions.
+            _conversationManager?.UpdateConfig(_config);
+        }
+
+        if (!IsDisposed)
+            _promptBox.Focus();
     }
 
     private void PromptBox_KeyDown(object? sender, KeyEventArgs e)
@@ -557,7 +592,7 @@ internal partial class MainForm : Form
 
     private async void NewConversationBtn_Click(object? sender, EventArgs e)
     {
-        try
+        await RunConversationActionAsync(async () =>
         {
             if (_conversationManager == null)
                 return;
@@ -569,11 +604,7 @@ internal partial class MainForm : Form
             LoadActiveConversationMessages();
             UpdateTitleBarText();
             _promptBox.Focus();
-        }
-        catch (Exception ex)
-        {
-            HandleUiException(ex, "创建新会话失败");
-        }
+        }, "创建新会话失败");
     }
 
     // ═══════════════════════════════════════════════════
@@ -585,7 +616,11 @@ internal partial class MainForm : Form
         if (_conversationManager?.ActiveConversation == null)
             return;
 
-        var conversation = _conversationManager.ActiveConversation;
+        // Capture the manager active when generation starts. If settings later
+        // replace the field, this in-flight request still completes against the
+        // manager it began with, keeping generation decoupled from that event.
+        var manager = _conversationManager;
+        var conversation = manager.ActiveConversation;
         var conversationId = conversation.Id;
         if (IsConversationGenerating(conversationId))
             return;
@@ -603,9 +638,10 @@ internal partial class MainForm : Form
 
         try
         {
-            if (_promptEnhancer != null)
+            var enhancer = _promptEnhancer;
+            if (enhancer != null)
             {
-                var enhanceResult = _promptEnhancer.Enhance(
+                var enhanceResult = enhancer.Enhance(
                     prompt,
                     conversation,
                     attachedCopy);
@@ -619,14 +655,11 @@ internal partial class MainForm : Form
             }
 
             var userMsg = ChatMessage.UserMessage(prompt, [.. attachedCopy]);
-            if (_conversationManager != null)
+            await manager.AddMessageToConversationAsync(conversationId, userMsg);
+            if (IsActiveConversation(conversationId))
             {
-                await _conversationManager.AddMessageToConversationAsync(conversationId, userMsg);
-                if (IsActiveConversation(conversationId))
-                {
-                    RebuildConversationTabs();
-                    UpdateTitleBarText();
-                }
+                RebuildConversationTabs();
+                UpdateTitleBarText();
             }
 
             if (IsActiveConversation(conversationId))
@@ -665,8 +698,7 @@ internal partial class MainForm : Form
                 var imgPath = result.SavedPaths[i];
                 var usage = i == 0 ? result.Usage : null;
                 var assistantMsg = ChatMessage.AssistantMessage(prompt, imgPath, null, usage);
-                if (_conversationManager != null)
-                    await _conversationManager.AddMessageToConversationAsync(conversationId, assistantMsg);
+                await manager.AddMessageToConversationAsync(conversationId, assistantMsg);
 
                 if (IsActiveConversation(conversationId))
                 {
@@ -678,8 +710,7 @@ internal partial class MainForm : Form
             }
 
             var completionMsg = ChatMessage.SystemMessage(BuildCompletionMessage(result));
-            if (_conversationManager != null)
-                await _conversationManager.AddMessageToConversationAsync(conversationId, completionMsg);
+            await manager.AddMessageToConversationAsync(conversationId, completionMsg);
             if (IsActiveConversation(conversationId))
                 AddChatBubble(completionMsg);
             if (IsActiveConversation(conversationId))
@@ -700,10 +731,9 @@ internal partial class MainForm : Form
                 InvalidOperationException opEx => opEx.Message,
                 _ => $"未知错误：{ex.Message}",
             };
-            if (_conversationManager != null)
-                await _conversationManager.AddMessageToConversationAsync(
-                    conversationId,
-                    ChatMessage.SystemMessage(errorMsg));
+            await manager.AddMessageToConversationAsync(
+                conversationId,
+                ChatMessage.SystemMessage(errorMsg));
 
             if (IsActiveConversation(conversationId))
                 CompletePendingResponseWithError(conversationId, errorMsg);
@@ -722,33 +752,6 @@ internal partial class MainForm : Form
 
     //  UI Builders
     // ═══════════════════════════════════════════════════
-
-    private void ShowLoading(bool show, string? text = null)
-    {
-        if (!string.IsNullOrWhiteSpace(text))
-            _loadingLabel.Text = text;
-
-        if (show)
-        {
-            CenterLoadingLabel();
-            _loadingOverlay.Visible = true;
-            _loadingOverlay.BringToFront();
-            _sendBtn.Enabled = false;
-            _attachBtn.Enabled = false;
-        }
-        else
-        {
-            _loadingOverlay.Visible = false;
-            _sendBtn.Enabled = true;
-            _attachBtn.Enabled = true;
-        }
-    }
-
-    private void CenterLoadingLabel()
-    {
-        _loadingLabel.Left = Math.Max(0, (_loadingOverlay.Width - _loadingLabel.PreferredWidth) / 2);
-        _loadingLabel.Top = Math.Max(0, (_loadingOverlay.Height - _loadingLabel.PreferredHeight) / 2);
-    }
 
     private bool IsActiveConversation(string conversationId) =>
         string.Equals(
@@ -772,6 +775,9 @@ internal partial class MainForm : Form
 
     private void AddChatBubble(ChatMessage msg)
     {
+        if (DeferChatUiUpdateWhileMinimized())
+            return;
+
         var bubble = CreateBubble(msg);
         _chatPanel.Controls.Add(bubble);
         StackChatRows();
@@ -786,6 +792,9 @@ internal partial class MainForm : Form
         {
             BeginInvoke(() =>
             {
+                if (IsDisposed || DeferChatUiUpdateWhileMinimized())
+                    return;
+
                 StackChatRows();
                 ResizeChatPanelHeight();
                 RestoreChatScroll(GetChatMaxScrollY());

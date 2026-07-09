@@ -24,8 +24,6 @@ internal partial class MainForm
         _attachBtn.Text = tight ? "" : compact ? T("Upload") : T("UploadImage");
         _sendBtn.Text = compact ? T("Generate") : T("GenerateImage");
         _promptBox.PlaceholderText = T("PromptPlaceholder");
-        if (_loadingOverlay.Visible)
-            _loadingLabel.Text = T("Generating");
     }
 
     private void ApplyTheme()
@@ -45,10 +43,6 @@ internal partial class MainForm
         _promptBox.BackColor = palette.InputBack;
         _promptBox.ForeColor = palette.Text;
         titleLabel.ForeColor = palette.Text;
-        _loadingOverlay.BackColor = Color.FromArgb(
-            AppAppearance.NormalizeTheme(_config.Theme) == AppAppearance.DarkTheme ? 220 : 200,
-            palette.WindowBack);
-        _loadingLabel.ForeColor = palette.Primary;
 
         ApplyButtonTheme(settingsBtn, palette, primary: false);
         ApplyButtonTheme(newConversationBtn, palette, primary: true);

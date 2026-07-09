@@ -23,10 +23,6 @@ partial class MainForm
     private Panel chatContainer;
     private Panel _chatPanel;
 
-    // ── Loading overlay ──
-    private Panel _loadingOverlay;
-    private Label _loadingLabel;
-
     // ── Input area ──
     private Panel inputPanel;
     private Panel inputCard;
@@ -79,8 +75,6 @@ partial class MainForm
         this.conversationTabs = new FlowLayoutPanel();
         this.chatContainer = new Panel();
         this._chatPanel = new Panel();
-        this._loadingOverlay = new Panel();
-        this._loadingLabel = new Label();
         this.inputPanel = new Panel();
         this.inputCard = new Panel();
         this._thumbnailStrip = new FlowLayoutPanel();
@@ -205,21 +199,6 @@ partial class MainForm
         this.chatContainer.Controls.Add(this._chatPanel);
 
         // ═══════════════════════════════════════════════════
-        //  _loadingOverlay
-        // ═══════════════════════════════════════════════════
-        this._loadingOverlay.Visible = false;
-        this._loadingOverlay.BackColor = Color.FromArgb(200, 245, 247, 250);
-        this._loadingOverlay.Dock = DockStyle.Fill;
-
-        //  _loadingLabel
-        this._loadingLabel.Text = "🔄 正在生成图片...";
-        this._loadingLabel.Font = new Font("Microsoft YaHei UI", 14F, FontStyle.Bold);
-        this._loadingLabel.ForeColor = Color.FromArgb(59, 130, 246);
-        this._loadingLabel.AutoSize = true;
-        this._loadingLabel.TextAlign = ContentAlignment.MiddleCenter;
-        this._loadingOverlay.Controls.Add(this._loadingLabel);
-
-        // ═══════════════════════════════════════════════════
         //  inputPanel
         // ═══════════════════════════════════════════════════
         this.inputPanel.Dock = DockStyle.Bottom;
@@ -303,7 +282,6 @@ partial class MainForm
         //  Assemble main form (bottom → top docking order)
         // ═══════════════════════════════════════════════════
         this.Controls.Add(this.chatContainer);
-        this.Controls.Add(this._loadingOverlay);
         this.Controls.Add(this.separator);
         this.Controls.Add(this.conversationBar);
         this.Controls.Add(this.topBar);

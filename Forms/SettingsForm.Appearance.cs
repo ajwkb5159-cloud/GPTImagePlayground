@@ -149,6 +149,7 @@ internal partial class SettingsForm
         formatTab.Text = T("Format");
         _contextTab.Text = T("Context");
         _appearanceTab.Text = T("Appearance");
+        _aboutTab.Text = T("About");
 
         lblApiUrl.Text = T("ApiUrl");
         lblApiKey.Text = T("ApiKey");
@@ -173,6 +174,11 @@ internal partial class SettingsForm
         lblConcurrencyHint.Text = T("ConcurrencyHint");
         _themeLabel.Text = T("Theme");
         _languageLabel.Text = T("Language");
+
+        _versionCaptionLabel.Text = T("CurrentVersion");
+        _updateCaptionLabel.Text = T("UpdateCaption");
+        _checkUpdateBtn.Text = " " + T("CheckUpdate");
+        _aboutDescriptionLabel.Text = T("AboutDescription");
         browseBtn.Text = "";
         _conversationBrowseBtn.Text = "";
         _buttonToolTip.SetToolTip(browseBtn, T("Browse"));
@@ -231,9 +237,18 @@ internal partial class SettingsForm
         ApplyButtonTheme(_conversationBrowseBtn, palette, primary: false);
         ApplyButtonTheme(saveBtn, palette, primary: true);
         ApplyButtonTheme(cancelBtn, palette, primary: false);
+        ApplyButtonTheme(_checkUpdateBtn, palette, primary: false);
         ApplyIconOnlyButtonLayout(showKeyBtn);
         ApplyIconOnlyButtonLayout(browseBtn);
         ApplyIconOnlyButtonLayout(_conversationBrowseBtn);
+
+        _appNameLabel.ForeColor = palette.Text;
+        _versionValueLabel.ForeColor = palette.Text;
+        _versionCaptionLabel.ForeColor = palette.Text;
+        _updateCaptionLabel.ForeColor = palette.Text;
+        _aboutDescriptionLabel.ForeColor = palette.MutedText;
+        if (!_isCheckingUpdate && _updateStatusLabel.ForeColor != Color.FromArgb(220, 38, 38))
+            _updateStatusLabel.ForeColor = palette.MutedText;
     }
 
     private void ApplyButtonIcons()
@@ -242,6 +257,7 @@ internal partial class SettingsForm
         SetScaledButtonImage(_conversationBrowseBtn, "upload-image-24.png", 20);
         SetScaledButtonImage(saveBtn, "save-24.png", 18);
         SetScaledButtonImage(cancelBtn, "close-24.png", 18);
+        SetScaledButtonImage(_checkUpdateBtn, "update-24.png", 18);
         UpdateShowKeyIcon();
         ApplyIconOnlyButtonLayout(browseBtn);
         ApplyIconOnlyButtonLayout(_conversationBrowseBtn);

@@ -102,6 +102,8 @@ internal partial class SettingsForm
             _contextTable.SuspendLayout();
             _appearanceScrollPanel.SuspendLayout();
             _appearanceTable.SuspendLayout();
+            _aboutScrollPanel.SuspendLayout();
+            _aboutTable.SuspendLayout();
             buttonPanel.SuspendLayout();
 
             Padding = new Padding(padding);
@@ -110,6 +112,7 @@ internal partial class SettingsForm
             formatTab.Padding = new Padding(tabPadding);
             _contextTab.Padding = new Padding(tabPadding);
             _appearanceTab.Padding = new Padding(tabPadding);
+            _aboutTab.Padding = new Padding(tabPadding);
 
             SetColumnWidth(basicTable, 0, english ? compact ? 132 : 150 : compact ? 92 : 110);
             SetColumnWidth(basicTable, 2, compact ? 42 : 48);
@@ -117,6 +120,7 @@ internal partial class SettingsForm
             SetColumnWidth(_contextTable, 2, compact ? 42 : 48);
             SetColumnWidth(_contextTable, 3, compact ? 28 : 32);
             SetColumnWidth(_appearanceTable, 0, english ? compact ? 118 : 132 : compact ? 98 : 120);
+            SetColumnWidth(_aboutTable, 0, english ? compact ? 128 : 150 : compact ? 98 : 120);
             SetColumnWidth(sizeTable, 0, english ? compact ? 118 : 132 : compact ? 92 : 110);
             SetColumnWidth(sizeTable, 2, english ? compact ? 110 : 128 : compact ? 88 : 110);
             SetColumnWidth(formatTable, 0, english ? compact ? 132 : 150 : compact ? 98 : 120);
@@ -128,6 +132,7 @@ internal partial class SettingsForm
             _contextTable.RowStyles[11].Height = ScaleValue(compact ? 48 : 54);
             SetAbsoluteRows(sizeTable, 6, ScaleValue(english ? compact ? 44 : 48 : compact ? 36 : 40));
             SetAbsoluteRows(formatTable, 6, rowHeight);
+            ApplyAboutTableLayout(rowHeight, compact);
             var contextBottomGap = ScaleValue(compact ? 10 : 12);
             _contextScrollPanel.AutoScrollMargin = new Size(0, contextBottomGap);
             _contextScrollPanel.Padding = new Padding(0, 0, 0, contextBottomGap);
@@ -163,6 +168,8 @@ internal partial class SettingsForm
             buttonPanel.ResumeLayout(true);
             _appearanceTable.ResumeLayout(true);
             _appearanceScrollPanel.ResumeLayout(true);
+            _aboutTable.ResumeLayout(true);
+            _aboutScrollPanel.ResumeLayout(true);
             _contextTable.ResumeLayout(true);
             _contextScrollPanel.ResumeLayout(true);
             _formatScrollPanel.ResumeLayout(true);
@@ -209,6 +216,7 @@ internal partial class SettingsForm
     private void DisposeCachedResources()
     {
         _resizeDebounceTimer.Dispose();
+        _updateCts?.Dispose();
 
         foreach (var font in _fontCache.Values)
             font.Dispose();
@@ -269,6 +277,39 @@ internal partial class SettingsForm
             var trailingMargin = column == table.ColumnCount - 1 ? 0 : rightMargin;
             control.Margin = new Padding(0, verticalMargin, trailingMargin, verticalMargin);
         }
+    }
+
+    private void ApplyAboutTableLayout(int rowHeight, bool compact)
+    {
+        _aboutTable.RowStyles[0].SizeType = SizeType.Absolute;
+        _aboutTable.RowStyles[0].Height = ScaleValue(compact ? 46 : 52);
+        _aboutTable.RowStyles[1].SizeType = SizeType.Absolute;
+        _aboutTable.RowStyles[1].Height = rowHeight;
+        _aboutTable.RowStyles[2].SizeType = SizeType.Absolute;
+        _aboutTable.RowStyles[2].Height = rowHeight;
+        _aboutTable.RowStyles[3].SizeType = SizeType.Absolute;
+        _aboutTable.RowStyles[3].Height = ScaleValue(compact ? 26 : 30);
+
+        _appNameLabel.Font = UiFont(compact ? 12F : 13F, FontStyle.Bold);
+        _versionCaptionLabel.Font = UiFont(compact ? 9F : 10F);
+        _versionValueLabel.Font = UiFont(compact ? 9F : 10F);
+        _updateCaptionLabel.Font = UiFont(compact ? 9F : 10F);
+        _updateStatusLabel.Font = UiFont(compact ? 8.5F : 9F);
+        _aboutDescriptionLabel.Font = UiFont(compact ? 8.5F : 9F);
+
+        var descriptionWidth = Math.Max(
+            ScaleValue(240),
+            _aboutTable.ClientSize.Width - ScaleValue(compact ? 8 : 12));
+        _aboutDescriptionLabel.MaximumSize = new Size(descriptionWidth, 0);
+
+        _checkUpdateBtn.Font = UiFont(compact ? 9F : 10F);
+        _checkUpdateBtn.Size = new Size(ScaleValue(compact ? 138 : 158), ScaleValue(compact ? 30 : 32));
+        _checkUpdateBtn.TextImageRelation = TextImageRelation.ImageBeforeText;
+        _checkUpdateBtn.ImageAlign = ContentAlignment.MiddleLeft;
+        _checkUpdateBtn.TextAlign = ContentAlignment.MiddleCenter;
+        _checkUpdateBtn.Margin = new Padding(0, ScaleValue(compact ? 5 : 7), 0, ScaleValue(compact ? 5 : 7));
+        SetScaledButtonImage(_checkUpdateBtn, "update-24.png", 18);
+        UpdateButtonRegion(_checkUpdateBtn, ScaleValue(8));
     }
 
     private static decimal Clamp(int value, decimal min, decimal max) =>

@@ -43,6 +43,7 @@ internal partial class SettingsForm : Form
         InitializeComponent();
         BuildContextTab();
         BuildAppearanceTab();
+        BuildAboutTab();
 
         Result = currentConfig;
         SetAppearanceSelections(currentConfig.Theme, currentConfig.Language);

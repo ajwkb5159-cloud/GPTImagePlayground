@@ -37,6 +37,9 @@ internal partial class MainForm
 
     private void AddPendingResponseBubble(PendingResponseState state)
     {
+        if (DeferChatUiUpdateWhileMinimized())
+            return;
+
         RemoveVisiblePendingResponseBubble();
 
         var rowWidth = GetChatRowWidth();
@@ -134,6 +137,9 @@ internal partial class MainForm
         if (!IsActiveConversation(conversationId))
             return;
 
+        if (DeferChatUiUpdateWhileMinimized())
+            return;
+
         if (_pendingResponseRow == null)
             AddPendingResponseBubble(state);
 
@@ -155,6 +161,9 @@ internal partial class MainForm
         }
 
         if (!IsActiveConversation(conversationId))
+            return;
+
+        if (DeferChatUiUpdateWhileMinimized())
             return;
 
         if (_pendingResponseRow == null)
@@ -181,6 +190,9 @@ internal partial class MainForm
     private void CompletePendingResponseWithMessage(string conversationId, ChatMessage msg)
     {
         if (!IsActiveConversation(conversationId))
+            return;
+
+        if (DeferChatUiUpdateWhileMinimized())
             return;
 
         if (_pendingResponseRow == null)
@@ -236,6 +248,9 @@ internal partial class MainForm
 
     private void RemoveVisiblePendingResponseBubble()
     {
+        if (DeferChatUiUpdateWhileMinimized())
+            return;
+
         if (_pendingResponseRow != null)
         {
             _chatPanel.Controls.Remove(_pendingResponseRow);

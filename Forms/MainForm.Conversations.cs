@@ -5,7 +5,34 @@ namespace ImageGenerator.Forms;
 
 internal partial class MainForm
 {
-    private async Task InitializeConversationsAsync()
+    // Serializes user-triggered conversation actions (switch/new/delete/rename/
+    // settings-reinit) against each other only. It is deliberately independent of
+    // generation state: other conversations may keep generating while one switches.
+    private readonly SemaphoreSlim _conversationGate = new(1, 1);
+
+    private async Task RunConversationActionAsync(Func<Task> action, string errorTitle)
+    {
+        if (!await _conversationGate.WaitAsync(0))
+            return;
+
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            HandleUiException(ex, errorTitle);
+        }
+        finally
+        {
+            _conversationGate.Release();
+        }
+    }
+
+    private Task InitializeConversationsAsync() =>
+        RunConversationActionAsync(RebuildConversationManagerAsync, "初始化会话失败");
+
+    private async Task RebuildConversationManagerAsync()
     {
         _promptEnhancer = new PromptEnhancer(
             new ContextDecisionService(new TextSimilarityService()));
@@ -16,6 +43,9 @@ internal partial class MainForm
             _config);
 
         await _conversationManager.InitializeAsync();
+        if (IsDisposed || _isClosing)
+            return;
+
         _configManager.Save(_config);
         RebuildConversationTabs();
         LoadActiveConversationMessages();
@@ -124,9 +154,8 @@ internal partial class MainForm
         return menu;
     }
 
-    private async Task SwitchConversationAsync(string conversationId)
-    {
-        try
+    private Task SwitchConversationAsync(string conversationId) =>
+        RunConversationActionAsync(async () =>
         {
             if (_conversationManager == null)
                 return;
@@ -136,16 +165,10 @@ internal partial class MainForm
             RebuildConversationTabs();
             LoadActiveConversationMessages();
             UpdateTitleBarText();
-        }
-        catch (Exception ex)
-        {
-            HandleUiException(ex, "切换会话失败");
-        }
-    }
+        }, "切换会话失败");
 
-    private async Task DeleteConversationAsync(string conversationId)
-    {
-        try
+    private Task DeleteConversationAsync(string conversationId) =>
+        RunConversationActionAsync(async () =>
         {
             if (_conversationManager == null)
                 return;
@@ -182,16 +205,10 @@ internal partial class MainForm
             RebuildConversationTabs();
             LoadActiveConversationMessages();
             UpdateTitleBarText();
-        }
-        catch (Exception ex)
-        {
-            HandleUiException(ex, "删除会话失败");
-        }
-    }
+        }, "删除会话失败");
 
-    private async Task RenameConversationAsync(string conversationId)
-    {
-        try
+    private Task RenameConversationAsync(string conversationId) =>
+        RunConversationActionAsync(async () =>
         {
             if (_conversationManager == null)
                 return;
@@ -208,12 +225,7 @@ internal partial class MainForm
             _configManager.Save(_config);
             RebuildConversationTabs();
             UpdateTitleBarText();
-        }
-        catch (Exception ex)
-        {
-            HandleUiException(ex, "重命名会话失败");
-        }
-    }
+        }, "重命名会话失败");
 
     private string? PromptForConversationTitle(string currentTitle, int displayNumber)
     {
