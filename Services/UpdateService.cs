@@ -26,12 +26,14 @@ internal sealed record UpdateCheckResult(
 /// </summary>
 internal sealed class UpdateService
 {
-    // GitHub REST API endpoint for the latest published release.
-    private const string LatestReleaseApi =
-        "https://api.github.com/repos/ajwkb5159-cloud/GPTImagePlayground/releases/latest";
+    // GitHub REST API endpoint that lists repository tags.
+    private const string TagsApi =
+        "https://api.github.com/repos/ajwkb5159-cloud/GPTImagePlayground/tags?per_page=100";
 
-    // Preferred asset name inside the release; any .zip is accepted as a fallback.
-    private const string PreferredAssetName = "GPTImageGenerator.zip";
+    // Fixed download location: the packaged zip attached to the matching release.
+    // {0} is replaced with the tag name (e.g. "1.1.2").
+    private const string DownloadUrlTemplate =
+        "https://github.com/ajwkb5159-cloud/GPTImagePlayground/releases/download/{0}/GPTImageGenerator.zip";
 
     private readonly bool _verifySslCertificate;
 
@@ -59,17 +61,22 @@ internal sealed class UpdateService
         using var client = CreateHttpClient();
 
         using var response = await client.GetAsync(
-            LatestReleaseApi,
+            TagsApi,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
-        var (latestVersion, downloadUrl, notes) = ParseLatestRelease(json);
+        var latestTag = FindLatestTag(json);
 
         var current = CurrentVersion;
+        if (latestTag is null)
+            return new UpdateCheckResult(false, current, current, null, null);
+
+        var latestVersion = NormalizeVersionText(latestTag);
         var isNewer = CompareVersions(latestVersion, current) > 0;
-        return new UpdateCheckResult(isNewer, current, latestVersion, downloadUrl, notes);
+        var downloadUrl = string.Format(DownloadUrlTemplate, latestTag);
+        return new UpdateCheckResult(isNewer, current, latestVersion, downloadUrl, null);
     }
 
     /// <summary>
@@ -183,44 +190,37 @@ internal sealed class UpdateService
         return client;
     }
 
-    private static (string Version, string? DownloadUrl, string? Notes) ParseLatestRelease(string json)
+    /// <summary>
+    /// Scans the tags list and returns the tag name with the highest semantic version.
+    /// The Tags API does not guarantee ordering, so every tag is compared explicitly.
+    /// </summary>
+    private static string? FindLatestTag(string json)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Array)
+            return null;
 
-        var tag = root.TryGetProperty("tag_name", out var tagElement)
-            ? tagElement.GetString() ?? ""
-            : "";
-        var version = NormalizeVersionText(tag);
-
-        var notes = root.TryGetProperty("body", out var bodyElement)
-            ? bodyElement.GetString()
-            : null;
-
-        string? downloadUrl = null;
-        if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
+        string? bestTag = null;
+        string? bestVersion = null;
+        foreach (var tag in root.EnumerateArray())
         {
-            foreach (var asset in assets.EnumerateArray())
+            if (!tag.TryGetProperty("name", out var nameElement))
+                continue;
+
+            var name = nameElement.GetString();
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+
+            var version = NormalizeVersionText(name);
+            if (bestVersion is null || CompareVersions(version, bestVersion) > 0)
             {
-                var name = asset.TryGetProperty("name", out var nameElement)
-                    ? nameElement.GetString()
-                    : null;
-                if (name is null || !name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var url = asset.TryGetProperty("browser_download_url", out var urlElement)
-                    ? urlElement.GetString()
-                    : null;
-                if (url is null)
-                    continue;
-
-                downloadUrl = url;
-                if (name.Equals(PreferredAssetName, StringComparison.OrdinalIgnoreCase))
-                    break;
+                bestVersion = version;
+                bestTag = name;
             }
         }
 
-        return (version, downloadUrl, notes);
+        return bestTag;
     }
 
     private static string NormalizeVersionText(string tag)
