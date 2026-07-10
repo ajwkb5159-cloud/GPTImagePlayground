@@ -143,8 +143,9 @@ internal sealed class UpdateService
     /// Extracts the downloaded package and launches a detached updater script that waits
     /// for this process to exit, overwrites the application files, and relaunches the app.
     /// The caller is responsible for exiting the application right after this returns.
+    /// Returns the path to the updater log file for diagnostics.
     /// </summary>
-    public void LaunchUpdaterAndPrepareExit(string zipPath)
+    public string LaunchUpdaterAndPrepareExit(string zipPath)
     {
         var appDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         var exePath = Environment.ProcessPath ?? Path.Combine(appDir, "ImageGenerator.exe");
@@ -156,10 +157,17 @@ internal sealed class UpdateService
         Directory.CreateDirectory(extractDir);
         ZipFile.ExtractToDirectory(zipPath, extractDir, overwriteFiles: true);
 
+        // Detect whether the zip contained a single root folder (common when zipping
+        // a directory rather than its contents). If so, use that folder's contents as
+        // the source so xcopy overwrites the app files directly instead of creating a
+        // nested subdirectory that the old exe can never find.
+        var sourceDir = ResolveExtractedSourceDir(extractDir);
+
+        var logPath = Path.Combine(Path.GetTempPath(), $"GPTImageGenerator_update_{Guid.NewGuid():N}.log");
         var scriptPath = Path.Combine(
             Path.GetTempPath(),
             $"GPTImageGenerator_update_{Guid.NewGuid():N}.bat");
-        File.WriteAllText(scriptPath, BuildUpdaterScript(processId, extractDir, appDir, exePath, zipPath), new UTF8Encoding(false));
+        File.WriteAllText(scriptPath, BuildUpdaterScript(processId, sourceDir, appDir, exePath, zipPath, extractDir, logPath), new UTF8Encoding(false));
 
         var startInfo = new ProcessStartInfo
         {
@@ -170,6 +178,22 @@ internal sealed class UpdateService
             CreateNoWindow = true,
         };
         Process.Start(startInfo);
+
+        return logPath;
+    }
+
+    /// <summary>
+    /// If the extracted directory contains only a single subdirectory and no loose files,
+    /// the zip was created from a folder (e.g. "publish/") rather than from its contents.
+    /// Returns the actual source directory whose contents should overwrite the app.
+    /// </summary>
+    private static string ResolveExtractedSourceDir(string extractDir)
+    {
+        var entries = Directory.GetFileSystemEntries(extractDir);
+        if (entries.Length == 1 && Directory.Exists(entries[0]))
+            return entries[0];
+
+        return extractDir;
     }
 
     private HttpClient CreateHttpClient()
@@ -259,26 +283,45 @@ internal sealed class UpdateService
 
     private static string BuildUpdaterScript(
         int processId,
-        string extractDir,
+        string sourceDir,
         string appDir,
         string exePath,
-        string zipPath)
+        string zipPath,
+        string extractDir,
+        string logPath)
     {
         // Waits for the app to exit, copies the extracted files over the install
         // directory, relaunches the app, then cleans up temporary files and itself.
+        // All significant output is written to a log file so failures are diagnosable.
         return $"""
             @echo off
+            setlocal enabledelayedexpansion
             chcp 65001 >nul
+            set "LOG={logPath}"
+            echo [%date% %time%] Updater started >> "!LOG!"
+            echo   PID={processId} >> "!LOG!"
+            echo   Source={sourceDir} >> "!LOG!"
+            echo   Target={appDir} >> "!LOG!"
+            echo   Exe={exePath} >> "!LOG!"
             :waitloop
             tasklist /FI "PID eq {processId}" 2>nul | findstr /I "{processId}" >nul
-            if %errorlevel%==0 (
+            if !errorlevel!==0 (
                 ping -n 2 127.0.0.1 >nul
                 goto waitloop
             )
-            xcopy /E /Y /I "{extractDir}\*" "{appDir}\" >nul
-            start "" "{exePath}"
-            rmdir /S /Q "{extractDir}" >nul 2>&1
-            del "{zipPath}" >nul 2>&1
+            echo [%date% %time%] Process exited, copying files... >> "!LOG!"
+            xcopy /E /Y /I "{sourceDir}\*" "{appDir}\" >> "!LOG!" 2>&1
+            if !errorlevel! neq 0 (
+                echo [%date% %time%] ERROR: xcopy failed with code !errorlevel! >> "!LOG!"
+            ) else (
+                echo [%date% %time%] Copy completed successfully. >> "!LOG!"
+            )
+            echo [%date% %time%] Launching app... >> "!LOG!"
+            start "" "{exePath}" >> "!LOG!" 2>&1
+            echo [%date% %time%] Cleaning up... >> "!LOG!"
+            rmdir /S /Q "{extractDir}" >> "!LOG!" 2>&1
+            del "{zipPath}" >> "!LOG!" 2>&1
+            echo [%date% %time%] Updater finished. >> "!LOG!"
             del "%~f0" >nul 2>&1
             """;
     }

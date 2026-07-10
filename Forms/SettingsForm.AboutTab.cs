@@ -203,15 +203,25 @@ internal partial class SettingsForm
         var zipPath = await service.DownloadPackageAsync(downloadUrl, progress, token);
 
         _updateStatusLabel.Text = T("InstallingUpdate");
-        service.LaunchUpdaterAndPrepareExit(zipPath);
+        var logPath = service.LaunchUpdaterAndPrepareExit(zipPath);
 
         MessageBox.Show(
             this,
-            T("RestartToUpdate"),
+            string.Format(T("RestartToUpdate"), logPath),
             T("UpdateTitle"),
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
 
-        Application.Exit();
+        // Close the settings dialog so the main form can shut down cleanly.
+        DialogResult = DialogResult.OK;
+
+        // Force the process to terminate after a brief grace period. This guarantees
+        // the updater script can overwrite files even if there are lingering background
+        // threads or pending async operations.
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(3000);
+            Environment.Exit(0);
+        });
     }
 }
