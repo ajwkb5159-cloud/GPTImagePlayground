@@ -170,6 +170,8 @@ internal partial class MainForm
             LayoutSystemBubble(systemBubble, availableWidth);
         else if (bubble is Panel { Tag: "system-center" } centeredSystemBubble)
             LayoutCenteredSystemBubble(centeredSystemBubble, availableWidth);
+        else if (bubble is Panel { Tag: "assistant-bubble" } assistantBubble)
+            RelayoutAssistantBubble(assistantBubble, availableWidth);
 
         if (bubble.AutoSize)
         {
@@ -415,6 +417,7 @@ internal partial class MainForm
             BackColor = Color.White,
             Padding = new Padding(padding),
             Margin = new Padding(0),
+            Tag = "assistant-bubble",
         };
         panel.Paint += (_, e) =>
         {
@@ -652,5 +655,41 @@ internal partial class MainForm
         panel.Size = new Size(
             Math.Min(maxWidth, preferred.Width + panel.Padding.Horizontal),
             preferred.Height + panel.Padding.Vertical);
+    }
+
+    private void RelayoutAssistantBubble(Panel bubble, int availableWidth)
+    {
+        var padding = bubble.Padding;
+        var contentWidth = Math.Max(ScaleValue(160), availableWidth - padding.Horizontal);
+
+        int y = padding.Top;
+        foreach (Control child in bubble.Controls)
+        {
+            if (child is PictureBox pb)
+            {
+                var targetWidth = Math.Min(pb.Width, contentWidth);
+                if (targetWidth != pb.Width)
+                {
+                    var ratio = (float)targetWidth / Math.Max(1, pb.Width);
+                    pb.Height = Math.Max(ScaleValue(48), (int)Math.Round(pb.Height * ratio));
+                    pb.Width = targetWidth;
+                }
+                pb.Location = new Point(padding.Left, y);
+                y = pb.Bottom + ScaleValue(8);
+            }
+            else if (child is Label lbl)
+            {
+                lbl.MaximumSize = new Size(contentWidth, 0);
+                lbl.Location = new Point(lbl.Left, y);
+                y = lbl.Bottom + ScaleValue(4);
+            }
+        }
+
+        bubble.Width = Math.Min(availableWidth,
+            Math.Max(padding.Horizontal + contentWidth,
+                bubble.Controls.Count > 0
+                    ? bubble.Controls.Cast<Control>().Max(c => c.Right) + padding.Right
+                    : padding.Horizontal));
+        bubble.Height = y + padding.Bottom;
     }
 }

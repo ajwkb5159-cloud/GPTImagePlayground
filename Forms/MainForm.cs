@@ -43,6 +43,7 @@ internal partial class MainForm : Form
     private bool _isClosing;
     private int _lastChatScrollY;
     private bool _lastChatWasAtBottom = true;
+    private bool _resizeDebounceActive;
     private readonly Dictionary<(int SizeHundredths, FontStyle Style), Font> _fontCache = [];
     private readonly Dictionary<Button, IconTextButtonState> _iconTextButtonStates = [];
     private readonly System.Windows.Forms.Timer _resizeDebounceTimer = new() { Interval = ResizeDebounceMs };
@@ -98,7 +99,7 @@ internal partial class MainForm : Form
 
         chatContainer.SizeChanged += (_, _) =>
         {
-            if (WindowState == FormWindowState.Minimized || _isApplyingResponsiveLayout)
+            if (WindowState == FormWindowState.Minimized || _isApplyingResponsiveLayout || _resizeDebounceActive)
                 return;
 
             UpdateChatPanelBounds();
@@ -167,6 +168,7 @@ internal partial class MainForm : Form
         _resizeRestoreFromMinimized |= restoringFromMinimized;
         _resizeRestoreScrollY = _lastChatScrollY;
         _resizeRestoreToBottom = _lastChatWasAtBottom;
+        _resizeDebounceActive = true;
         _resizeDebounceTimer.Stop();
         _resizeDebounceTimer.Start();
     }
@@ -174,6 +176,7 @@ internal partial class MainForm : Form
     private void FlushResponsiveResize()
     {
         _resizeDebounceTimer.Stop();
+        _resizeDebounceActive = false;
         if (IsDisposed || WindowState == FormWindowState.Minimized)
             return;
 
@@ -188,6 +191,13 @@ internal partial class MainForm : Form
         {
             _wasMinimized = false;
             QueueRestoreLayoutRefresh(restoreToBottom, restoreScrollY);
+        }
+        else
+        {
+            // Ensure chat layout and scroll are correct after normal resize
+            FinalizeRestoreChatScroll(restoreToBottom, restoreScrollY);
+            _chatPanel.Invalidate(true);
+            chatContainer.Invalidate(true);
         }
     }
 
