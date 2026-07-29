@@ -113,6 +113,30 @@ internal partial class MainForm
         }
 
         conversationTabs.ResumeLayout(true);
+        SyncConversationBarHeight();
+    }
+
+    /// <summary>
+    /// Ensures the conversation bar is tall enough to show tab buttons in full
+    /// when the horizontal scrollbar appears due to tab overflow.
+    /// </summary>
+    private void SyncConversationBarHeight()
+    {
+        var logicalClientSize = ClientSize.Width > 0 && ClientSize.Height > 0
+            ? GetLogicalClientSize()
+            : new SizeF(ReferenceWidth, ReferenceHeight);
+        var compact = logicalClientSize.Width < 560 || logicalClientSize.Height < 520;
+
+        var baseHeight = ScaleValue(compact ? 38 : 42);
+
+        var scrollbarShown = conversationTabs.IsHandleCreated
+                             && conversationTabs.Controls.Count > 0
+                             && conversationTabs.HorizontalScroll.Visible;
+
+        if (scrollbarShown)
+            baseHeight += SystemInformation.HorizontalScrollBarHeight;
+
+        conversationBar.Height = baseHeight;
     }
 
     private Button CreateConversationTab(ConversationMeta meta, int displayNumber)
@@ -151,6 +175,9 @@ internal partial class MainForm
         renameItem.Click += async (_, _) => await RenameConversationAsync(conversationId);
         var deleteItem = menu.Items.Add(T("Delete"));
         deleteItem.Click += async (_, _) => await DeleteConversationAsync(conversationId);
+        menu.Items.Add(new ToolStripSeparator());
+        var deleteOthersItem = menu.Items.Add(T("DeleteOthers"));
+        deleteOthersItem.Click += async (_, _) => await DeleteOtherConversationsAsync(conversationId);
         return menu;
     }
 
@@ -206,6 +233,77 @@ internal partial class MainForm
             LoadActiveConversationMessages();
             UpdateTitleBarText();
         }, "删除会话失败");
+
+    /// <summary>
+    /// Deletes all conversations except the one whose tab was right-clicked.
+    /// The <paramref name="keepConversationId"/> comes from the context menu's
+    /// captured conversation ID — it is always the right-clicked tab, not the
+    /// currently active conversation.
+    /// </summary>
+    private Task DeleteOtherConversationsAsync(string keepConversationId) =>
+        RunConversationActionAsync(async () =>
+        {
+            if (_conversationManager == null)
+                return;
+
+            var others = _conversationManager.ConversationList
+                .Where(meta => meta.Id != keepConversationId)
+                .Select(meta => meta.Id)
+                .ToList();
+
+            if (others.Count == 0)
+            {
+                MessageBox.Show(
+                    this,
+                    T("NoOtherConversations"),
+                    T("Conversation"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return;
+            }
+
+            var confirmMessage = string.Format(T("DeleteOthersConfirm"), others.Count);
+            var dialogResult = MessageBox.Show(
+                this,
+                confirmMessage,
+                T("Conversation"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+
+            if (dialogResult != DialogResult.Yes)
+                return;
+
+            // Cancel any in-flight generation on conversations that will be deleted.
+            foreach (var id in others)
+            {
+                if (_pendingResponses.TryGetValue(id, out var pendingState))
+                    pendingState.Cancellation?.Cancel();
+            }
+
+            // If the currently active conversation is among those being deleted,
+            // remove its visible pending bubble before the delete switches away.
+            var activeWillBeDeleted = _conversationManager.ActiveConversationId != null
+                                      && others.Contains(_conversationManager.ActiveConversationId);
+            if (activeWillBeDeleted && _pendingResponseRow != null)
+                RemoveVisiblePendingResponseBubble();
+
+            // Delete each of the other conversations.
+            foreach (var id in others)
+                await _conversationManager.DeleteConversationAsync(id);
+
+            // Ensure the right-clicked conversation becomes (or stays) active.
+            var needSwitch = activeWillBeDeleted
+                             || _conversationManager.ActiveConversationId != keepConversationId;
+
+            if (needSwitch)
+                await _conversationManager.SwitchToConversationAsync(keepConversationId);
+
+            _configManager.Save(_config);
+            RebuildConversationTabs();
+            LoadActiveConversationMessages();
+            UpdateTitleBarText();
+        }, "删除其他会话失败");
 
     private Task RenameConversationAsync(string conversationId) =>
         RunConversationActionAsync(async () =>

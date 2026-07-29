@@ -374,6 +374,7 @@ internal partial class MainForm : Form
             inputCard.ResumeLayout(true);
             inputPanel.ResumeLayout(true);
             conversationBar.ResumeLayout(true);
+            SyncConversationBarHeight();
             topBar.ResumeLayout(true);
             ResumeLayout(true);
             _isApplyingResponsiveLayout = false;
