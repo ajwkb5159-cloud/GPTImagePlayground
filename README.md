@@ -34,6 +34,7 @@ GPTImagePlayground is a .NET 10 Windows Forms desktop client for AI image genera
 - API credentials stored in local `appsettings.json` (Git-ignored).
 - Configurable request timeout.
 - SSL certificate verification toggle for self-signed or non-standard endpoints.
+- Built-in self-update mechanism: checks GitHub Releases, downloads the latest package, and launches an automated updater.
 
 ## Tech Stack
 
@@ -152,6 +153,7 @@ Services/
   PromptEnhancer.cs         Build final prompt from user input + conversation context
   TextSimilarityService.cs  CJK-aware local similarity scoring
   AppAppearance.cs          Theme palette and localization dictionaries
+  UpdateService.cs          GitHub release check, download, and self-update launcher
 Forms/
   MainForm.cs               Main chat UI (split into partial files)
   SettingsForm.cs            Settings dialog (split into partial files)
