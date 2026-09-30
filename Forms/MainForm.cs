@@ -664,11 +664,14 @@ internal partial class MainForm : Form
         var enhancedPrompt = prompt;
         ContextDecision? contextDecision = null;
         ContextBudgetPlan? contextBudget = null;
+        // Gemini image models receive the whole conversation through "contents", so the local
+        // context prefix (which exists to fake that) is skipped for them entirely.
+        var geminiContext = ImageProtocolResolver.UsesGeminiContext(_config.Model);
 
         try
         {
             var enhancer = _promptEnhancer;
-            if (enhancer != null)
+            if (enhancer != null && !geminiContext)
             {
                 var enhanceResult = enhancer.Enhance(
                     prompt,
@@ -717,8 +720,13 @@ internal partial class MainForm : Form
                     });
             });
 
+            // Gemini models go through the gateway's native multi-turn interface; everything else keeps
+            // using the stateless OpenAI-compatible image endpoints.
+            var geminiService = geminiContext ? new GeminiImageService(_config) : null;
             var result = await Task.Run(() =>
-                apiService.GenerateAsync(enhancedPrompt, attachedCopy, progress, cts.Token));
+                geminiService != null
+                    ? geminiService.GenerateAsync(enhancedPrompt, attachedCopy, conversation, progress, cts.Token)
+                    : apiService.GenerateAsync(enhancedPrompt, attachedCopy, progress, cts.Token));
 
             if (_isClosing || IsDisposed)
                 return;

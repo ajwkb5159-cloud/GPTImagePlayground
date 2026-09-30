@@ -14,10 +14,12 @@ internal class ImageApiService
     };
 
     private readonly AppConfig _config;
+    private readonly GeneratedImageSaver _saver;
 
     public ImageApiService(AppConfig config)
     {
         _config = config;
+        _saver = new GeneratedImageSaver(config);
     }
 
     private HttpClient CreateHttpClient() => ApiHttpClientFactory.Create(
@@ -35,7 +37,7 @@ internal class ImageApiService
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        EnsureOutputDirectory();
+        _saver.EnsureOutputDirectory();
 
         using var httpClient = CreateHttpClient();
 
@@ -87,7 +89,12 @@ internal class ImageApiService
                 .ConfigureAwait(false);
             var imageResponse = images.Response;
 
-            var savedPaths = await SaveImagesAsync(images.Images, false, progress, cancellationToken)
+            var savedPaths = await _saver
+                .SaveAsync(
+                    [.. images.Images.Select(image => new GeneratedImageData(image.Bytes, image.Mime))],
+                    false,
+                    progress,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
             sw.Stop();
@@ -148,16 +155,16 @@ internal class ImageApiService
         }
 
         var images = succeeded
-            .Select(result => (Bytes: result.ImageBytes!, Mime: result.MimeType!))
+            .Select(result => new GeneratedImageData(result.ImageBytes!, result.MimeType!))
             .ToList();
-        var savedPaths = await SaveImagesAsync(images, true, progress, cancellationToken)
+        var savedPaths = await _saver.SaveAsync(images, true, progress, cancellationToken)
             .ConfigureAwait(false);
 
         return new GenerateResult
         {
             SavedPaths = savedPaths,
             DataUrls = images.Select(img =>
-                $"data:{img.Mime};base64,{Convert.ToBase64String(img.Bytes)}").ToList(),
+                $"data:{img.MimeType};base64,{Convert.ToBase64String(img.Bytes)}").ToList(),
             Usage = AggregateUsage(succeeded.Select(result => result.Usage)),
             ServerTimeSeconds = succeeded.Max(result => result.ServerTimeSeconds),
             TotalTimeSeconds = sw.Elapsed.TotalSeconds,
@@ -442,35 +449,6 @@ internal class ImageApiService
         return (imageResponse, images);
     }
 
-    private async Task<List<string>> SaveImagesAsync(
-        List<(byte[] Bytes, string Mime)> images,
-        bool forceIndexedNames,
-        IProgress<string>? progress,
-        CancellationToken cancellationToken)
-    {
-        var savedPaths = new List<string>();
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var outputDir = !string.IsNullOrWhiteSpace(_config.OutputDir)
-            ? _config.OutputDir
-            : Path.GetTempPath();
-        var extension = GetOutputExtension();
-
-        for (var i = 0; i < images.Count; i++)
-        {
-            var fileName = Path.Combine(outputDir,
-                forceIndexedNames || images.Count > 1
-                    ? $"newapi_{timestamp}_{i + 1}.{extension}"
-                    : $"newapi_{timestamp}.{extension}");
-
-            await File.WriteAllBytesAsync(fileName, images[i].Bytes, cancellationToken)
-                .ConfigureAwait(false);
-            savedPaths.Add(fileName);
-            progress?.Report($"已保存 {fileName} ({images[i].Bytes.Length / 1024} KB)");
-        }
-
-        return savedPaths;
-    }
-
     private async Task<string> BuildHttpErrorAsync(
         HttpResponseMessage response,
         string? requestDebugInfo,
@@ -496,12 +474,6 @@ internal class ImageApiService
         debugInfo.AppendLine(requestEndpoint);
 
         return debugInfo.ToString();
-    }
-
-    private void EnsureOutputDirectory()
-    {
-        if (!string.IsNullOrWhiteSpace(_config.OutputDir) && !Directory.Exists(_config.OutputDir))
-            Directory.CreateDirectory(_config.OutputDir);
     }
 
     private static UsageInfo? AggregateUsage(IEnumerable<UsageInfo?> usages)
@@ -573,11 +545,8 @@ internal class ImageApiService
         _config.CustomWidth,
         _config.CustomHeight);
 
-    private static string NormalizeOutputFormat(string? format)
-    {
-        var value = (format ?? "png").Trim().ToLowerInvariant();
-        return value is "png" or "jpeg" or "webp" ? value : "png";
-    }
+    private static string NormalizeOutputFormat(string? format) =>
+        GeneratedImageSaver.NormalizeOutputFormat(format);
 
     private static string NormalizeModeration(string? moderation)
     {
@@ -585,19 +554,7 @@ internal class ImageApiService
         return value is "auto" or "low" ? value : "auto";
     }
 
-    private string GetOutputMime() => NormalizeOutputFormat(_config.OutputFormat) switch
-    {
-        "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        _ => "image/png",
-    };
-
-    private string GetOutputExtension() => NormalizeOutputFormat(_config.OutputFormat) switch
-    {
-        "jpeg" => "jpg",
-        "webp" => "webp",
-        _ => "png",
-    };
+    private string GetOutputMime() => _saver.OutputMime;
 
     private static int Clamp(int value, int min, int max) =>
         Math.Min(max, Math.Max(min, value));

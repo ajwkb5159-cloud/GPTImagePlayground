@@ -188,6 +188,9 @@ internal partial class MainForm
             UsageSummary.FormatCount(profile.MaxContextTokens),
             sharePercent);
 
+        if (ImageProtocolResolver.UsesGeminiContext(_config.Model))
+            text += T("GeminiMode");
+
         text += Environment.NewLine;
 
         if (totals.Requests > 0)
