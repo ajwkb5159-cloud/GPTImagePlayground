@@ -1,4 +1,5 @@
 using ImageGenerator.Models;
+using ImageGenerator.Services;
 
 namespace ImageGenerator.Forms;
 
@@ -22,19 +23,24 @@ internal partial class SettingsForm : Form
     private TabPage _contextTab = null!;
     private Panel _contextScrollPanel = null!;
     private TableLayoutPanel _contextTable = null!;
+    private ComboBox _contextModelCombo = null!;
+    private Button _fetchModelsBtn = null!;
+    private NumericUpDown _maxContextTokensNumeric = null!;
+    private NumericUpDown _maxOutputTokensNumeric = null!;
+    private Label _contextStatusLabel = null!;
     private TextBox _conversationDirBox = null!;
     private Button _conversationBrowseBtn = null!;
-    private NumericUpDown _maxActiveMessagesNumeric = null!;
-    private NumericUpDown _compressionTriggerNumeric = null!;
-    private NumericUpDown _keepRecentNumeric = null!;
-    private NumericUpDown _maxContextPromptsNumeric = null!;
-    private NumericUpDown _maxContextImagesNumeric = null!;
-    private NumericUpDown _contextAutoAttachThresholdNumeric = null!;
-    private CheckBox _referenceDetectionCheck = null!;
-    private CheckBox _promptEnhancementCheck = null!;
-    private CheckBox _showContextDecisionHintCheck = null!;
-    private CheckBox _allowHistoryImagesWithManualAttachmentsCheck = null!;
     private ToolTip _buttonToolTip = null!;
+
+    private readonly ModelDiscoveryService _modelDiscovery = new();
+    private List<ModelContextProfile> _modelProfiles = [];
+    private CancellationTokenSource? _fetchModelsCts;
+    private bool _isFetchingModels;
+    private bool _isLoadingModelProfile;
+    private bool _contextStatusIsError;
+    private bool _suppressModelFilter;
+    private bool _isSyncingModelFields;
+    private string _contextEditorModel = "";
 
     public AppConfig Result { get; private set; }
 
@@ -71,20 +77,12 @@ internal partial class SettingsForm : Form
         _concurrentCheck.Checked = currentConfig.UseConcurrentStrategy;
         _concurrencyNumeric.Value = Clamp(currentConfig.MaxConcurrency, _concurrencyNumeric.Minimum, _concurrencyNumeric.Maximum);
         _conversationDirBox.Text = currentConfig.ConversationStoreDir;
-        _maxActiveMessagesNumeric.Value = Clamp(currentConfig.MaxActiveMessages, _maxActiveMessagesNumeric.Minimum, _maxActiveMessagesNumeric.Maximum);
-        _compressionTriggerNumeric.Value = Clamp(currentConfig.CompressionTriggerCount, _compressionTriggerNumeric.Minimum, _compressionTriggerNumeric.Maximum);
-        _keepRecentNumeric.Value = Clamp(currentConfig.KeepRecentCount, _keepRecentNumeric.Minimum, _keepRecentNumeric.Maximum);
-        _maxContextPromptsNumeric.Value = Clamp(currentConfig.MaxContextPrompts, _maxContextPromptsNumeric.Minimum, _maxContextPromptsNumeric.Maximum);
-        _maxContextImagesNumeric.Value = Clamp(currentConfig.MaxContextImages, _maxContextImagesNumeric.Minimum, _maxContextImagesNumeric.Maximum);
-        _contextAutoAttachThresholdNumeric.Value = Clamp(currentConfig.ContextAutoAttachThreshold, _contextAutoAttachThresholdNumeric.Minimum, _contextAutoAttachThresholdNumeric.Maximum);
-        _referenceDetectionCheck.Checked = currentConfig.EnableReferenceDetection;
-        _promptEnhancementCheck.Checked = currentConfig.EnablePromptEnhancement;
-        _showContextDecisionHintCheck.Checked = currentConfig.ShowContextDecisionHint;
-        _allowHistoryImagesWithManualAttachmentsCheck.Checked = currentConfig.AllowHistoryImagesWithManualAttachments;
+        LoadModelProfiles(currentConfig);
 
         showKeyBtn.Click += ShowKeyBtn_Click;
         browseBtn.Click += BrowseBtn_Click;
         _conversationBrowseBtn.Click += ConversationBrowseBtn_Click;
+        _modelBox.TextChanged += (_, _) => SyncContextTabWithModelField();
         saveBtn.Click += SaveBtn_Click;
         cancelBtn.Click += CancelBtn_Click;
         _sizeAutoRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
@@ -162,6 +160,7 @@ internal partial class SettingsForm : Form
         ApplyRoundedButtonStyle(showKeyBtn, 8);
         ApplyRoundedButtonStyle(browseBtn, 8);
         ApplyRoundedButtonStyle(_conversationBrowseBtn, 8);
+        ApplyRoundedButtonStyle(_fetchModelsBtn, 8);
         ApplyRoundedButtonStyle(saveBtn, 8);
         ApplyRoundedButtonStyle(cancelBtn, 8);
     }
@@ -304,16 +303,7 @@ internal partial class SettingsForm : Form
                 ? "conversations"
                 : _conversationDirBox.Text.Trim(),
             LastConversationId = Result.LastConversationId,
-            MaxActiveMessages = (int)_maxActiveMessagesNumeric.Value,
-            CompressionTriggerCount = (int)_compressionTriggerNumeric.Value,
-            KeepRecentCount = (int)_keepRecentNumeric.Value,
-            MaxContextPrompts = (int)_maxContextPromptsNumeric.Value,
-            MaxContextImages = (int)_maxContextImagesNumeric.Value,
-            ContextAutoAttachThreshold = _contextAutoAttachThresholdNumeric.Value,
-            ShowContextDecisionHint = _showContextDecisionHintCheck.Checked,
-            AllowHistoryImagesWithManualAttachments = _allowHistoryImagesWithManualAttachmentsCheck.Checked,
-            EnableReferenceDetection = _referenceDetectionCheck.Checked,
-            EnablePromptEnhancement = _promptEnhancementCheck.Checked,
+            ModelProfiles = BuildModelProfilesForSave(_modelBox.Text.Trim()),
             Theme = SelectedTheme,
             Language = SelectedLanguage,
         };
@@ -331,6 +321,11 @@ internal partial class SettingsForm : Form
         if (string.IsNullOrWhiteSpace(Result.Model))
         {
             MessageBox.Show(this, T("ModelRequired"), T("ValidationFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (_maxOutputTokensNumeric.Value >= _maxContextTokensNumeric.Value)
+        {
+            MessageBox.Show(this, T("MaxOutputTokensInvalid"), T("ValidationFailed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
         if (!TryValidateWritableDirectory(Result.OutputDir, Path.GetTempPath(), out var outputDirError))

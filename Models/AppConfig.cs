@@ -5,6 +5,13 @@ internal class AppConfig
     public string BaseUrl { get; set; } = "";
     public string ApiKey { get; set; } = "";
     public string Model { get; set; } = "gpt-image-2";
+
+    /// <summary>
+    /// Context capability per model. The active model is <see cref="Model"/>; its profile supplies
+    /// the token budget the conversation context is sized against.
+    /// </summary>
+    public List<ModelContextProfile> ModelProfiles { get; set; } = [];
+
     public string OutputDir { get; set; } = "";
     public int TimeoutMinutes { get; set; } = 10;
     public bool VerifySslCertificate { get; set; } = true;
@@ -21,16 +28,13 @@ internal class AppConfig
     public int MaxConcurrency { get; set; } = 4;
     public string ConversationStoreDir { get; set; } = "conversations";
     public string? LastConversationId { get; set; }
-    public int MaxActiveMessages { get; set; } = 20;
-    public int CompressionTriggerCount { get; set; } = 30;
-    public int KeepRecentCount { get; set; } = 10;
-    public int MaxContextPrompts { get; set; } = 5;
-    public int MaxContextImages { get; set; } = 1;
-    public decimal ContextAutoAttachThreshold { get; set; } = 0.55M;
-    public bool ShowContextDecisionHint { get; set; } = true;
-    public bool AllowHistoryImagesWithManualAttachments { get; set; }
-    public bool EnableReferenceDetection { get; set; } = true;
-    public bool EnablePromptEnhancement { get; set; } = true;
+
+    /// <summary>
+    /// When true (the default) the newest generated image of the active conversation travels with
+    /// the next request as the edit base; the chat input exposes this as a checkbox.
+    /// </summary>
+    public bool ReuseLastImage { get; set; } = true;
+
     public string Theme { get; set; } = "light";
     public string Language { get; set; } = "zh-CN";
 }

@@ -1,4 +1,4 @@
-﻿namespace ImageGenerator.Forms;
+namespace ImageGenerator.Forms;
 
 internal partial class SettingsForm
 {
@@ -127,9 +127,10 @@ internal partial class SettingsForm
 
             SetAbsoluteRows(basicTable, 6, rowHeight);
             SetAbsoluteRows(_appearanceTable, 2, rowHeight);
-            SetAbsoluteRows(_contextTable, 11, compact ? ScaleValue(38) : rowHeight);
-            _contextTable.RowStyles[11].SizeType = SizeType.Absolute;
-            _contextTable.RowStyles[11].Height = ScaleValue(compact ? 48 : 54);
+            SetAbsoluteRows(_contextTable, 5, compact ? ScaleValue(38) : rowHeight);
+            _contextTable.RowStyles[3].Height = ScaleValue(compact ? 52 : 62);
+            _contextTable.RowStyles[5].SizeType = SizeType.Absolute;
+            _contextTable.RowStyles[5].Height = ScaleValue(compact ? 56 : 72);
             SetAbsoluteRows(sizeTable, 6, ScaleValue(english ? compact ? 44 : 48 : compact ? 36 : 40));
             SetAbsoluteRows(formatTable, 6, rowHeight);
             ApplyAboutTableLayout(rowHeight, compact);
@@ -151,15 +152,18 @@ internal partial class SettingsForm
             cancelBtn.Font = UiFont(compact ? 9F : 10F);
             browseBtn.Font = UiFont(compact ? 9F : 10F);
             _conversationBrowseBtn.Font = UiFont(compact ? 9F : 10F);
+            _fetchModelsBtn.Font = UiFont(compact ? 9F : 10F);
             showKeyBtn.Size = new Size(showKeyBtn.Width, ScaleValue(compact ? 28 : 30));
             browseBtn.Size = new Size(browseBtn.Width, ScaleValue(compact ? 28 : 30));
             _conversationBrowseBtn.Size = new Size(_conversationBrowseBtn.Width, ScaleValue(compact ? 28 : 30));
+            _fetchModelsBtn.Size = new Size(_fetchModelsBtn.Width, ScaleValue(compact ? 28 : 30));
             ApplyButtonIcons();
 
             var buttonRadius = ScaleValue(8);
             UpdateButtonRegion(showKeyBtn, buttonRadius);
             UpdateButtonRegion(browseBtn, buttonRadius);
             UpdateButtonRegion(_conversationBrowseBtn, buttonRadius);
+            UpdateButtonRegion(_fetchModelsBtn, buttonRadius);
             UpdateButtonRegion(saveBtn, buttonRadius);
             UpdateButtonRegion(cancelBtn, buttonRadius);
         }
@@ -217,6 +221,7 @@ internal partial class SettingsForm
     {
         _resizeDebounceTimer.Dispose();
         _updateCts?.Dispose();
+        _fetchModelsCts?.Dispose();
 
         foreach (var font in _fontCache.Values)
             font.Dispose();

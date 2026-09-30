@@ -24,6 +24,9 @@ internal partial class MainForm
         _attachBtn.Text = tight ? "" : compact ? T("Upload") : T("UploadImage");
         _sendBtn.Text = compact ? T("Generate") : T("GenerateImage");
         _promptBox.PlaceholderText = T("PromptPlaceholder");
+        _modelSelector.AccessibleName = T("SwitchModel");
+        _modelSelectorToolTip?.SetToolTip(_modelSelector, T("SwitchModel"));
+        RefreshContextUsageLabel();
     }
 
     private void ApplyTheme()
@@ -48,6 +51,7 @@ internal partial class MainForm
         ApplyButtonTheme(newConversationBtn, palette, primary: true);
         ApplyButtonTheme(_attachBtn, palette, primary: false);
         ApplyButtonTheme(_sendBtn, palette, primary: true);
+        ApplyModelSelectorTheme(palette);
 
         RebuildConversationTabs();
     }

@@ -194,19 +194,15 @@ internal class ConversationManager
         _conversationList.Sort((left, right) => right.UpdatedAt.CompareTo(left.UpdatedAt));
     }
 
-    private ContextWindowConfig CreateContextConfigFromAppConfig() => new()
+    private ContextWindowConfig CreateContextConfigFromAppConfig()
     {
-        MaxActiveMessages = Math.Max(1, _config.MaxActiveMessages),
-        CompressionTriggerCount = Math.Max(2, _config.CompressionTriggerCount),
-        KeepRecentCount = Math.Max(1, _config.KeepRecentCount),
-        MaxContextPrompts = Math.Max(0, _config.MaxContextPrompts),
-        MaxContextImages = Math.Max(1, _config.MaxContextImages),
-        ContextAutoAttachThreshold = Clamp(_config.ContextAutoAttachThreshold, 0.1M, 0.95M),
-        ShowContextDecisionHint = _config.ShowContextDecisionHint,
-        AllowHistoryImagesWithManualAttachments = _config.AllowHistoryImagesWithManualAttachments,
-        EnableReferenceDetection = _config.EnableReferenceDetection,
-        EnablePromptEnhancement = _config.EnablePromptEnhancement,
-    };
+        var profile = ModelProfileStore.Resolve(_config, _config.Model);
+        return new ContextWindowConfig
+        {
+            MaxContextTokens = profile.MaxContextTokens,
+            MaxOutputTokens = profile.MaxOutputTokens,
+        };
+    }
 
     private void EnsureConversationConfig(Conversation conversation)
     {
@@ -214,6 +210,11 @@ internal class ConversationManager
         ApplyConfigToConversation(conversation);
     }
 
+    /// <summary>
+    /// Copies the token budget of the active model onto a conversation. The message-count limits
+    /// are left alone: <c>ContextBudgetPlanner</c> derives them from that budget before each
+    /// generation.
+    /// </summary>
     private void ApplyConfigToConversation(Conversation conversation)
     {
         if (conversation.ContextConfig == null)
@@ -222,18 +223,8 @@ internal class ConversationManager
             return;
         }
 
-        conversation.ContextConfig.MaxActiveMessages = Math.Max(1, _config.MaxActiveMessages);
-        conversation.ContextConfig.CompressionTriggerCount = Math.Max(2, _config.CompressionTriggerCount);
-        conversation.ContextConfig.KeepRecentCount = Math.Max(1, _config.KeepRecentCount);
-        conversation.ContextConfig.MaxContextPrompts = Math.Max(0, _config.MaxContextPrompts);
-        conversation.ContextConfig.MaxContextImages = Math.Max(1, _config.MaxContextImages);
-        conversation.ContextConfig.ContextAutoAttachThreshold = Clamp(_config.ContextAutoAttachThreshold, 0.1M, 0.95M);
-        conversation.ContextConfig.ShowContextDecisionHint = _config.ShowContextDecisionHint;
-        conversation.ContextConfig.AllowHistoryImagesWithManualAttachments = _config.AllowHistoryImagesWithManualAttachments;
-        conversation.ContextConfig.EnableReferenceDetection = _config.EnableReferenceDetection;
-        conversation.ContextConfig.EnablePromptEnhancement = _config.EnablePromptEnhancement;
+        var profile = ModelProfileStore.Resolve(_config, _config.Model);
+        conversation.ContextConfig.MaxContextTokens = profile.MaxContextTokens;
+        conversation.ContextConfig.MaxOutputTokens = profile.MaxOutputTokens;
     }
-
-    private static decimal Clamp(decimal value, decimal min, decimal max) =>
-        Math.Min(max, Math.Max(min, value));
 }

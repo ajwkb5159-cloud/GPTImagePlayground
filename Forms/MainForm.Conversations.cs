@@ -1,4 +1,4 @@
-﻿using ImageGenerator.Models;
+using ImageGenerator.Models;
 using ImageGenerator.Services;
 
 namespace ImageGenerator.Forms;
@@ -35,7 +35,9 @@ internal partial class MainForm
     private async Task RebuildConversationManagerAsync()
     {
         _promptEnhancer = new PromptEnhancer(
-            new ContextDecisionService(new TextSimilarityService()));
+            new ContextDecisionService(),
+            new ContextBudgetPlanner(),
+            _config);
         _conversationManager = new ConversationManager(
             new ConversationStore(_configManager.ResolveConversationStoreDir(_config)),
             new ContextCache(),
@@ -50,27 +52,58 @@ internal partial class MainForm
         RebuildConversationTabs();
         LoadActiveConversationMessages();
         UpdateTitleBarText();
+        RefreshContextUsageLabel();
     }
 
-    private static string BuildInitialGenerationStatus(ContextDecision? decision)
+    private static string BuildDecisionHint(ContextDecision? decision)
     {
         if (decision == null
             || (!decision.ShouldInjectTextContext && !decision.ShouldAttachRecentImages))
         {
-            return "正在请求 API...";
+            return "";
         }
 
         return string.IsNullOrWhiteSpace(decision.DecisionReason)
-            ? "已整理上下文，正在请求 API..."
-            : $"{decision.DecisionReason} 正在请求 API...";
+            ? "已整理上下文。"
+            : decision.DecisionReason;
     }
 
-    private string BuildInitialGenerationStatus(ContextDecision? decision, Conversation? conversation)
+    /// <summary>
+    /// Pending-bubble status: the real token budget of the selected model, how much history was
+    /// trimmed to fit it, and the local context decision.
+    /// </summary>
+    private string BuildInitialGenerationStatus(
+        ContextDecision? decision,
+        ContextBudgetPlan? budget)
     {
-        if (conversation?.ContextConfig.ShowContextDecisionHint != true)
-            return "正在请求 API...";
+        var parts = new List<string>();
+        if (budget != null)
+            parts.Add(BuildBudgetHint(budget));
 
-        return BuildInitialGenerationStatus(decision);
+        var decisionHint = BuildDecisionHint(decision);
+        if (!string.IsNullOrWhiteSpace(decisionHint))
+            parts.Add(decisionHint);
+
+        parts.Add("正在请求 API...");
+        return string.Join(" ", parts);
+    }
+
+    private string BuildBudgetHint(ContextBudgetPlan budget)
+    {
+        var text = string.Format(
+            T("ContextBudgetHint"),
+            UsageSummary.FormatCount(budget.EstimatedInputTokens),
+            UsageSummary.FormatCount(budget.InputBudget),
+            budget.Model.Length == 0 ? "-" : budget.Model,
+            UsageSummary.FormatCount(budget.MaxOutputTokens));
+
+        if (budget.TrimmedMessageCount > 0)
+            text += string.Format(T("ContextTrimmedHint"), budget.TrimmedMessageCount);
+
+        if (budget.PromptExceedsBudget)
+            text += T("ContextPromptOverBudgetHint");
+
+        return text;
     }
 
     private void LoadActiveConversationMessages()
@@ -82,6 +115,7 @@ internal partial class MainForm
             if (!TryRestorePendingResponseForActiveConversation())
                 AddWelcomeMessage();
             RefreshActiveConversationControls();
+            RefreshContextUsageLabel();
             return;
         }
 
@@ -90,6 +124,7 @@ internal partial class MainForm
 
         TryRestorePendingResponseForActiveConversation();
         RefreshActiveConversationControls();
+        RefreshContextUsageLabel();
     }
 
     private void RebuildConversationTabs()

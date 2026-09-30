@@ -1,7 +1,4 @@
 using System.Diagnostics;
-using System.Net;
-using System.Net.Http.Headers;
-using System.Net.Security;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -15,8 +12,6 @@ internal class ImageApiService
     {
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
-    private static readonly SocketsHttpHandler VerifiedHttpHandler = CreateHttpHandler(true);
-    private static readonly SocketsHttpHandler UnverifiedHttpHandler = CreateHttpHandler(false);
 
     private readonly AppConfig _config;
 
@@ -25,38 +20,10 @@ internal class ImageApiService
         _config = config;
     }
 
-    private static SocketsHttpHandler CreateHttpHandler(bool verifySslCertificate)
-    {
-        var handler = new SocketsHttpHandler
-        {
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-        };
-
-        if (!verifySslCertificate)
-        {
-            handler.SslOptions = new SslClientAuthenticationOptions
-            {
-                RemoteCertificateValidationCallback = (_, _, _, _) => true,
-            };
-        }
-
-        return handler;
-    }
-
-    private HttpClient CreateHttpClient()
-    {
-        var handler = _config.VerifySslCertificate
-            ? VerifiedHttpHandler
-            : UnverifiedHttpHandler;
-        var timeoutMinutes = Math.Max(1, _config.TimeoutMinutes);
-        var httpClient = new HttpClient(handler, disposeHandler: false)
-        {
-            Timeout = TimeSpan.FromMinutes(timeoutMinutes),
-        };
-        httpClient.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config.ApiKey);
-        return httpClient;
-    }
+    private HttpClient CreateHttpClient() => ApiHttpClientFactory.Create(
+        _config.ApiKey,
+        _config.VerifySslCertificate,
+        _config.TimeoutMinutes);
 
     /// <summary>
     /// Generate an image from a text prompt, optionally with reference images.
@@ -547,6 +514,7 @@ internal class ImageApiService
             .Where(usage => usage.InputTokensDetails != null)
             .Select(usage => usage.InputTokensDetails!)
             .ToList();
+        var cachedTokens = SumOptional(usageList.Select(usage => usage.ReportedCachedTokens));
 
         return new UsageInfo
         {
@@ -559,8 +527,29 @@ internal class ImageApiService
                 {
                     TextTokens = details.Sum(detail => detail.TextTokens),
                     ImageTokens = details.Sum(detail => detail.ImageTokens),
+                    CachedTokens = SumOptional(details.Select(detail => detail.CachedTokens)),
                 },
+            CachedTokens = cachedTokens,
+            CacheCreationInputTokens = SumOptional(
+                usageList.Select(usage => usage.CacheCreationInputTokens)),
+            CacheReadInputTokens = SumOptional(
+                usageList.Select(usage => usage.CacheReadInputTokens)),
         };
+    }
+
+    /// <summary>Sums optional provider values, staying null while nothing was reported.</summary>
+    private static int? SumOptional(IEnumerable<int?> values)
+    {
+        int? total = null;
+        foreach (var value in values)
+        {
+            if (!value.HasValue)
+                continue;
+
+            total = (total ?? 0) + value.Value;
+        }
+
+        return total;
     }
 
     private static string GetMimeType(string path)

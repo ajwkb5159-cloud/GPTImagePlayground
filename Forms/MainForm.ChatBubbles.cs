@@ -1,4 +1,5 @@
-﻿using ImageGenerator.Models;
+using ImageGenerator.Models;
+using ImageGenerator.Services;
 
 namespace ImageGenerator.Forms;
 
@@ -479,25 +480,63 @@ internal partial class MainForm
             y += pathLabel.Height + ScaleValue(4);
         }
 
-        // Usage info
+        // Token monitor: input/output totals, cache breakdown, and context share.
         if (msg.Usage != null)
         {
-            var usageLabel = new Label
+            var profile = ModelProfileStore.Resolve(_config, _config.Model);
+            foreach (var monitorLine in BuildUsageMonitorLines(msg.Usage, profile.MaxContextTokens))
             {
-                Text = $"📊 Tokens — 总计: {msg.Usage.TotalTokens}, 输入: {msg.Usage.InputTokens}, 输出: {msg.Usage.OutputTokens}",
-                AutoSize = true,
-                MaximumSize = new Size(contentWidth, 0),
-                ForeColor = Color.FromArgb(100, 116, 139),
-                Font = UiFont(8F),
-                Location = new Point(padding, y),
-            };
-            panel.Controls.Add(usageLabel);
-            panelWidth = Math.Max(panelWidth, Math.Min(maxWidth, usageLabel.Right + padding));
-            y += usageLabel.Height + ScaleValue(4);
+                var monitorLabel = new Label
+                {
+                    Text = monitorLine,
+                    AutoSize = true,
+                    MaximumSize = new Size(contentWidth, 0),
+                    ForeColor = Color.FromArgb(100, 116, 139),
+                    Font = UiFont(8F),
+                    Location = new Point(padding, y),
+                };
+                panel.Controls.Add(monitorLabel);
+                panelWidth = Math.Max(panelWidth, Math.Min(maxWidth, monitorLabel.Right + padding));
+                y += monitorLabel.Height + ScaleValue(4);
+            }
         }
 
         panel.Size = new Size(Math.Min(maxWidth, panelWidth), y + padding);
         return panel;
+    }
+
+    /// <summary>
+    /// Builds the per-response token monitor lines shown under a generated image. Cache values the
+    /// provider does not report are labelled as such instead of being displayed as zero.
+    /// </summary>
+    private static List<string> BuildUsageMonitorLines(UsageInfo usage, int maxContextTokens)
+    {
+        var cachedTokens = usage.ReportedCachedTokens;
+        var hitPercent = UsageSummary.CacheHitPercent(usage.InputTokens, cachedTokens);
+
+        var cacheLine = "🗂 缓存 — "
+            + $"命中 {UsageSummary.FormatOptional(cachedTokens)}"
+            + (hitPercent.HasValue ? $"（{hitPercent.Value}%）" : "")
+            + $" · 未缓存输入 {UsageSummary.FormatCount(usage.UncachedInputTokens)}"
+            + $" · 缓存读取 {UsageSummary.FormatOptional(usage.CacheReadInputTokens)}"
+            + $" · 缓存写入 {UsageSummary.FormatOptional(usage.CacheCreationInputTokens)}"
+            + (usage.HasCacheBreakdown ? "" : "（接口未上报缓存字段）");
+
+        var lines = new List<string>
+        {
+            $"📊 Tokens — 输入 {UsageSummary.FormatCount(usage.InputTokens)}"
+            + $" · 输出 {UsageSummary.FormatCount(usage.OutputTokens)}"
+            + $" · 总计 {UsageSummary.FormatCount(usage.TotalTokens)}",
+            cacheLine,
+        };
+
+        if (maxContextTokens > 0 && usage.TotalTokens > 0)
+        {
+            var percent = Math.Min(999, (int)Math.Round(usage.TotalTokens * 100.0 / maxContextTokens));
+            lines.Add($"📐 上下文占用 {percent}%（上限 {UsageSummary.FormatCount(maxContextTokens)} tokens）");
+        }
+
+        return lines;
     }
 
     private static Image LoadGeneratedPreviewImage(ChatMessage msg)

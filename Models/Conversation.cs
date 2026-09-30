@@ -55,4 +55,20 @@ internal class Conversation
         paths.Reverse();
         return paths;
     }
+
+    /// <summary>
+    /// Newest generated image recorded in this conversation, whether or not the file still exists,
+    /// so a missing file can be reported instead of silently dropping the reference.
+    /// </summary>
+    public string? GetLatestGeneratedImagePath()
+    {
+        for (var i = Messages.Count - 1; i >= 0; i--)
+        {
+            var path = Messages[i].GeneratedImagePath;
+            if (!string.IsNullOrWhiteSpace(path))
+                return path;
+        }
+
+        return null;
+    }
 }

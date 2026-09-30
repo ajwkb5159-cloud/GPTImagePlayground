@@ -82,6 +82,7 @@ internal partial class MainForm : Form
         _configManager = new ConfigManager();
         _config = _configManager.Load();
         _apiService = new ImageApiService(_config);
+        BuildModelSelector();
         ApplyLocalization();
         ApplyTheme();
 
@@ -317,6 +318,12 @@ internal partial class MainForm : Form
 
             inputCard.Padding = new Padding(ScaleValue(compact ? 9 : 12));
             _thumbnailStrip.Height = ScaleValue(compact ? 42 : 50);
+            // Prepare the token monitor row before the panel height is computed so the wrapped
+            // text gets the room it needs instead of shrinking the prompt box.
+            _monitorStrip.Padding = new Padding(0, ScaleValue(2), 0, ScaleValue(2));
+            _contextUsageLabel.Font = UiFont(compact ? 8.5F : 9F);
+            RefreshContextUsageLabel();
+            UpdateMonitorStripHeight(tight ? 2 : 3);
             UpdateInputPanelHeight();
             promptHost.Padding = compact
                 ? new Padding(ScaleValue(9), ScaleValue(6), ScaleValue(9), ScaleValue(6))
@@ -360,6 +367,8 @@ internal partial class MainForm : Form
                 compact ? 18 : 20,
                 compact ? 8 : 10);
 
+            ApplyModelSelectorLayout(compact, tight);
+
             _promptBox.Font = UiFont(compact ? 9F : 10F);
             if (_promptBox.IsHandleCreated)
                 SendMessage(_promptBox.Handle, EM_SETMARGINS, (IntPtr)EC_LEFTMARGIN, (IntPtr)ScaleValue(compact ? 8 : 12));
@@ -390,6 +399,9 @@ internal partial class MainForm : Form
 
         if (_thumbnailStrip.Visible)
             baseHeight += _thumbnailStrip.Height;
+
+        // The token monitor is a real row of the input card, so it has to be paid for here.
+        baseHeight += _monitorStrip.Height;
 
         inputPanel.Height = baseHeight;
     }
@@ -428,6 +440,7 @@ internal partial class MainForm : Form
         _resizeDebounceTimer.Dispose();
         _conversationGate.Dispose();
         DisposePendingResponses();
+        DisposeModelSelector();
         ClearThumbnailCache();
 
         foreach (var font in _fontCache.Values)
@@ -530,6 +543,10 @@ internal partial class MainForm : Form
         var previousStoreDir = _configManager.ResolveConversationStoreDir(_config);
         _config = dlg.Result;
         _apiService = new ImageApiService(_config);
+        // The dialog returns a new AppConfig instance, so anything holding the old reference
+        // (prompt enhancer, context budget planner) has to be pointed at the new one.
+        _promptEnhancer?.UpdateConfig(_config);
+        RefreshModelSelectorItems();
         _configManager.Save(_config);
         ApplyLocalization();
         ApplyTheme();
@@ -646,6 +663,7 @@ internal partial class MainForm : Form
         ClearAttachedThumbnails();
         var enhancedPrompt = prompt;
         ContextDecision? contextDecision = null;
+        ContextBudgetPlan? contextBudget = null;
 
         try
         {
@@ -658,6 +676,7 @@ internal partial class MainForm : Form
                     attachedCopy);
                 enhancedPrompt = enhanceResult.EnhancedPrompt;
                 contextDecision = enhanceResult.Decision;
+                contextBudget = enhanceResult.Budget;
                 foreach (var imagePath in enhanceResult.AutoAttachedImagePaths)
                 {
                     if (!attachedCopy.Contains(imagePath, StringComparer.OrdinalIgnoreCase))
@@ -677,7 +696,7 @@ internal partial class MainForm : Form
                 AddChatBubble(userMsg);
             var initialStatus = BuildInitialGenerationStatus(
                 contextDecision,
-                conversation);
+                contextBudget);
 
             var apiService = _apiService ?? new ImageApiService(_config);
             using var cts = new CancellationTokenSource(
@@ -756,6 +775,7 @@ internal partial class MainForm : Form
             if (!_isClosing && !IsDisposed)
             {
                 RefreshActiveConversationControls();
+                RefreshContextUsageLabel();
                 _promptBox.Focus();
             }
         }
@@ -782,6 +802,7 @@ internal partial class MainForm : Form
         _isGenerating = _pendingResponses.Count > 0;
         _sendBtn.Enabled = !activeConversationGenerating;
         _attachBtn.Enabled = !activeConversationGenerating;
+        _modelSelector.Enabled = !activeConversationGenerating;
     }
 
     private void AddChatBubble(ChatMessage msg)

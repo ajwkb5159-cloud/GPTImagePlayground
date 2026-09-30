@@ -187,12 +187,11 @@ internal partial class SettingsForm
         saveBtn.Text = " " + T("Save");
         cancelBtn.Text = " " + T("Cancel");
 
-        _referenceDetectionCheck.Text = T("Enabled");
-        _promptEnhancementCheck.Text = T("Enabled");
-        _showContextDecisionHintCheck.Text = T("Enabled");
-        _allowHistoryImagesWithManualAttachmentsCheck.Text = T("Enabled");
         ApplyTaggedLocalization(_contextTable);
         ApplyContextHelpLocalization();
+        _contextToolTip.SetToolTip(_fetchModelsBtn, T("FetchModels"));
+        if (!_isFetchingModels)
+            UpdateContextBudgetPreview();
     }
 
     private void ApplyTaggedLocalization(Control root)
@@ -235,12 +234,15 @@ internal partial class SettingsForm
         ApplyButtonTheme(showKeyBtn, palette, primary: false);
         ApplyButtonTheme(browseBtn, palette, primary: false);
         ApplyButtonTheme(_conversationBrowseBtn, palette, primary: false);
+        ApplyButtonTheme(_fetchModelsBtn, palette, primary: false);
         ApplyButtonTheme(saveBtn, palette, primary: true);
         ApplyButtonTheme(cancelBtn, palette, primary: false);
         ApplyButtonTheme(_checkUpdateBtn, palette, primary: false);
         ApplyIconOnlyButtonLayout(showKeyBtn);
         ApplyIconOnlyButtonLayout(browseBtn);
         ApplyIconOnlyButtonLayout(_conversationBrowseBtn);
+        ApplyIconOnlyButtonLayout(_fetchModelsBtn);
+        ApplyContextStatusColor();
 
         _appNameLabel.ForeColor = palette.Text;
         _versionValueLabel.ForeColor = palette.Text;
@@ -255,12 +257,14 @@ internal partial class SettingsForm
     {
         SetScaledButtonImage(browseBtn, "upload-image-24.png", 20);
         SetScaledButtonImage(_conversationBrowseBtn, "upload-image-24.png", 20);
+        SetScaledButtonImage(_fetchModelsBtn, "update-24.png", 20);
         SetScaledButtonImage(saveBtn, "save-24.png", 18);
         SetScaledButtonImage(cancelBtn, "close-24.png", 18);
         SetScaledButtonImage(_checkUpdateBtn, "update-24.png", 18);
         UpdateShowKeyIcon();
         ApplyIconOnlyButtonLayout(browseBtn);
         ApplyIconOnlyButtonLayout(_conversationBrowseBtn);
+        ApplyIconOnlyButtonLayout(_fetchModelsBtn);
     }
 
     private static void ApplyIconOnlyButtonLayout(Button button)
