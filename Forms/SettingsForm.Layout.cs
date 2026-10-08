@@ -127,10 +127,13 @@ internal partial class SettingsForm
 
             SetAbsoluteRows(basicTable, 6, rowHeight);
             SetAbsoluteRows(_appearanceTable, 2, rowHeight);
-            SetAbsoluteRows(_contextTable, 5, compact ? ScaleValue(38) : rowHeight);
-            _contextTable.RowStyles[3].Height = ScaleValue(compact ? 52 : 62);
-            _contextTable.RowStyles[5].SizeType = SizeType.Absolute;
-            _contextTable.RowStyles[5].Height = ScaleValue(compact ? 56 : 72);
+            // Rows: 0 model list, 1 search, 2 max context, 3 max output, 4 budget line (sizes to its
+            // text), 5 conversation folder, 6 help paragraph (sizes to its text).
+            SetAbsoluteRows(_contextTable, 4, compact ? ScaleValue(38) : rowHeight);
+            _contextTable.RowStyles[4].SizeType = SizeType.AutoSize;
+            _contextTable.RowStyles[4].Height = 0F;
+            _contextTable.RowStyles[6].SizeType = SizeType.AutoSize;
+            _contextTable.RowStyles[6].Height = 0F;
             SetAbsoluteRows(sizeTable, 6, ScaleValue(english ? compact ? 44 : 48 : compact ? 36 : 40));
             SetAbsoluteRows(formatTable, 6, rowHeight);
             ApplyAboutTableLayout(rowHeight, compact);
@@ -253,15 +256,9 @@ internal partial class SettingsForm
         {
             if (control is Label label)
             {
-                if (label == _sizeHelpLabel || label == lblConcurrencyHint)
+                if (label == _sizeHelpLabel || label == lblConcurrencyHint || label == _contextHelpLabel)
                 {
-                    label.Font = label == lblConcurrencyHint
-                        ? UiFont(8F)
-                        : UiFont(compact ? 9F : 10F);
-                    var availableWidth = Math.Max(
-                        ScaleValue(240),
-                        table.ClientSize.Width - ScaleValue(compact ? 8 : 12));
-                    label.MaximumSize = new Size(availableWidth, 0);
+                    ApplyHelpLabelLayout(label, table, compact);
                     continue;
                 }
 
@@ -282,6 +279,21 @@ internal partial class SettingsForm
             var trailingMargin = column == table.ColumnCount - 1 ? 0 : rightMargin;
             control.Margin = new Padding(0, verticalMargin, trailingMargin, verticalMargin);
         }
+    }
+
+    /// <summary>
+    /// Descriptive text under a tab (Format / Size / Context) shares one style; the Format tab's
+    /// hint is the reference: the same small font, the same middle-left alignment and a wrap width
+    /// that follows the table, so a long paragraph is fully readable instead of being clipped.
+    /// </summary>
+    private void ApplyHelpLabelLayout(Label label, TableLayoutPanel table, bool compact)
+    {
+        label.AutoSize = true;
+        label.Font = UiFont(8F);
+        label.TextAlign = ContentAlignment.MiddleLeft;
+        label.MaximumSize = new Size(
+            Math.Max(ScaleValue(240), table.ClientSize.Width - ScaleValue(compact ? 8 : 12)),
+            0);
     }
 
     private void ApplyAboutTableLayout(int rowHeight, bool compact)

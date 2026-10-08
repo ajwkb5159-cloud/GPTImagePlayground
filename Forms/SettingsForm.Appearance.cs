@@ -189,6 +189,7 @@ internal partial class SettingsForm
 
         ApplyTaggedLocalization(_contextTable);
         ApplyContextHelpLocalization();
+        _modelSearchBox.PlaceholderText = T("ModelSearchHint");
         _contextToolTip.SetToolTip(_fetchModelsBtn, T("FetchModels"));
         if (!_isFetchingModels)
             UpdateContextBudgetPreview();

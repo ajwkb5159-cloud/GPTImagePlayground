@@ -24,10 +24,12 @@ internal partial class SettingsForm : Form
     private Panel _contextScrollPanel = null!;
     private TableLayoutPanel _contextTable = null!;
     private ComboBox _contextModelCombo = null!;
+    private TextBox _modelSearchBox = null!;
     private Button _fetchModelsBtn = null!;
     private NumericUpDown _maxContextTokensNumeric = null!;
     private NumericUpDown _maxOutputTokensNumeric = null!;
     private Label _contextStatusLabel = null!;
+    private Label _contextHelpLabel = null!;
     private TextBox _conversationDirBox = null!;
     private Button _conversationBrowseBtn = null!;
     private ToolTip _buttonToolTip = null!;
