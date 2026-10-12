@@ -457,7 +457,11 @@ internal partial class MainForm
 
         var normalized = title.Trim();
         return normalized.Equals("新会话", StringComparison.OrdinalIgnoreCase)
-            || normalized.StartsWith("窗体", StringComparison.OrdinalIgnoreCase)
+            || normalized.Equals("新會話", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("窗体", StringComparison.OrdinalIgnoreCase)   // pre-1.2.3 display titles
+            || normalized.StartsWith("窗體", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("对话", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("對話", StringComparison.OrdinalIgnoreCase)
             || normalized.StartsWith("Chat ", StringComparison.OrdinalIgnoreCase)
             || normalized.Equals("New Chat", StringComparison.OrdinalIgnoreCase)
             || normalized.Equals("New Conversation", StringComparison.OrdinalIgnoreCase);

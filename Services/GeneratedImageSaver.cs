@@ -55,18 +55,60 @@ internal sealed class GeneratedImageSaver
             // The extension follows the bytes that actually arrived: the Gemini interface ignores
             // output_format and may hand back JPEG even when PNG was configured.
             var extension = ExtensionFor(images[i].MimeType);
-            var fileName = Path.Combine(outputDir,
-                forceIndexedNames || images.Count > 1
-                    ? $"newapi_{timestamp}_{i + 1}.{extension}"
-                    : $"newapi_{timestamp}.{extension}");
+            var baseName = forceIndexedNames || images.Count > 1
+                ? $"newapi_{timestamp}_{i + 1}"
+                : $"newapi_{timestamp}";
 
-            await File.WriteAllBytesAsync(fileName, images[i].Bytes, cancellationToken)
+            var filePath = await WriteUniqueAsync(outputDir, baseName, extension, images[i].Bytes, cancellationToken)
                 .ConfigureAwait(false);
-            savedPaths.Add(fileName);
-            progress?.Report($"已保存 {fileName} ({images[i].Bytes.Length / 1024} KB)");
+            savedPaths.Add(filePath);
+            progress?.Report($"已保存 {filePath} ({images[i].Bytes.Length / 1024} KB)");
         }
 
         return savedPaths;
+    }
+
+    /// <summary>
+    /// Writes the bytes to a name that is guaranteed to be free. Two generations that finish in the
+    /// same second (parallel conversations, concurrent sub-requests) would otherwise compute the
+    /// same file name and the later write would silently destroy the earlier image. CreateNew makes
+    /// the reservation atomic, so a collision costs a suffix instead of a picture.
+    /// </summary>
+    private static async Task<string> WriteUniqueAsync(
+        string outputDir,
+        string baseName,
+        string extension,
+        byte[] bytes,
+        CancellationToken cancellationToken)
+    {
+        for (var suffix = 1; suffix <= 1000; suffix++)
+        {
+            var fileName = suffix == 1
+                ? $"{baseName}.{extension}"
+                : $"{baseName}_{suffix}.{extension}";
+            var path = Path.Combine(outputDir, fileName);
+
+            try
+            {
+                var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                try
+                {
+                    await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    await stream.DisposeAsync().ConfigureAwait(false);
+                }
+
+                return path;
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+                // Name taken by an earlier request — try the next suffix.
+            }
+        }
+
+        throw new IOException($"无法为 {baseName}.{extension} 找到可用的文件名（同名文件过多）。");
     }
 
     /// <summary>Extension matching the payload, falling back to the configured output format.</summary>

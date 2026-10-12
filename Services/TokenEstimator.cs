@@ -79,6 +79,18 @@ internal static class TokenEstimator
         };
     }
 
+    /// <summary>
+    /// Broad CJK coverage: Han (incl. ext-A), CJK punctuation, kana, hangul, fullwidth forms and
+    /// halfwidth katakana all cost roughly one token per character, unlike Latin text. Without this
+    /// the budget would treat Japanese/Korean prompts as free and overshoot the model window.
+    /// </summary>
     private static bool IsCjk(char ch) =>
-        ch >= '\u4e00' && ch <= '\u9fff';
+        (ch >= '\u3000' && ch <= '\u303f')    // CJK punctuation
+        || (ch >= '\u3040' && ch <= '\u30ff') // hiragana + katakana
+        || (ch >= '\u3400' && ch <= '\u4dbf') // CJK ext-A
+        || (ch >= '\u4e00' && ch <= '\u9fff') // CJK unified ideographs
+        || (ch >= '\uf900' && ch <= '\ufaff') // CJK compatibility ideographs
+        || (ch >= '\ufe30' && ch <= '\ufe4f') // CJK compatibility forms
+        || (ch >= '\uff00' && ch <= '\uffef') // fullwidth / halfwidth forms
+        || (ch >= '\uac00' && ch <= '\ud7af'); // hangul syllables
 }

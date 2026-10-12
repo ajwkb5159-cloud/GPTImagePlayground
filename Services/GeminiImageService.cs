@@ -133,6 +133,9 @@ internal sealed class GeminiImageService
 
         if (succeeded.Count == 0)
         {
+            // Same rule as the OpenAI channel: cancellation/timeout must not be reported as a pile of
+            // failed sub-requests, otherwise the user sees "all sub-requests failed" for a timeout.
+            cancellationToken.ThrowIfCancellationRequested();
             throw new InvalidOperationException(
                 "所有子请求均失败，未生成可保存的图片。" + Environment.NewLine + string.Join(Environment.NewLine, failedMessages));
         }

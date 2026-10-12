@@ -58,6 +58,7 @@ internal partial class MainForm : Form
         public required string ConversationId { get; init; }
         public string Text { get; set; } = "";
         public bool IsError { get; set; }
+        public bool CancelledByUser { get; set; }
         public CancellationTokenSource? Cancellation { get; set; }
     }
 
@@ -93,6 +94,7 @@ internal partial class MainForm : Form
         newConversationBtn.Click += NewConversationBtn_Click;
         _attachBtn.Click += AttachBtn_Click;
         _sendBtn.Click += SendBtn_Click;
+        _cancelBtn.Click += CancelBtn_Click;
         _promptBox.KeyDown += PromptBox_KeyDown;
 
         _resizeDebounceTimer.Tick += (_, _) => FlushResponsiveResize();
@@ -367,6 +369,18 @@ internal partial class MainForm : Form
                 compact ? 18 : 20,
                 compact ? 8 : 10);
 
+            ApplyAdaptiveIconTextButton(
+                _cancelBtn,
+                _cancelBtn.Text,
+                "close-24.png",
+                compact ? 72 : 88,
+                compact ? 104 : 132,
+                compact ? 28 : 32,
+                compact ? 8.5F : 9F,
+                FontStyle.Bold,
+                compact ? 18 : 20,
+                compact ? 8 : 10);
+
             ApplyModelSelectorLayout(compact, tight);
 
             _promptBox.Font = UiFont(compact ? 9F : 10F);
@@ -425,12 +439,14 @@ internal partial class MainForm : Form
     private Font UiFont(float size, FontStyle style = FontStyle.Regular)
     {
         var fontSize = Math.Max(7.5F, size * _uiScale);
-        var sizeKey = (int)Math.Round(fontSize * 100F);
+        // Quantized to 0.25pt: the cache is never trimmed, and a continuously changing _uiScale
+        // (every resize step) would otherwise mint a Font per pixel of window width.
+        var sizeKey = (int)Math.Round(fontSize * 4F);
         var key = (sizeKey, style);
         if (_fontCache.TryGetValue(key, out var font))
             return font;
 
-        font = new Font("Microsoft YaHei UI", sizeKey / 100F, style);
+        font = new Font("Microsoft YaHei UI", sizeKey / 4F, style);
         _fontCache[key] = font;
         return font;
     }
@@ -759,19 +775,34 @@ internal partial class MainForm : Form
             if (_isClosing || IsDisposed)
                 return;
 
-            var errorMsg = ex switch
+            var cancelledByUser = _pendingResponses.TryGetValue(conversationId, out var pendingState)
+                && pendingState.CancelledByUser;
+            var errorMsg = cancelledByUser
+                ? T("GenerationCancelled")
+                : ex switch
+                {
+                    // TaskCanceledException (HttpClient timeout) derives from OperationCanceledException,
+                    // so one branch covers both the timeout and a cancelled token.
+                    OperationCanceledException => T("RequestTimeout"),
+                    HttpRequestException httpEx => $"API 请求失败：{httpEx.Message}",
+                    DirectoryNotFoundException dirEx => $"输出目录不存在或无法访问：{dirEx.Message}",
+                    UnauthorizedAccessException accessEx => $"没有文件访问权限，请检查输出目录或图片文件权限：{accessEx.Message}",
+                    IOException ioEx => $"文件读写失败，请检查磁盘空间、输出目录或图片文件是否可用：{ioEx.Message}",
+                    InvalidOperationException opEx => opEx.Message,
+                    _ => $"未知错误：{ex.Message}",
+                };
+
+            try
             {
-                TaskCanceledException => "请求超时，请检查超时设置或降低图片尺寸后重试。",
-                HttpRequestException httpEx => $"API 请求失败：{httpEx.Message}",
-                DirectoryNotFoundException dirEx => $"输出目录不存在或无法访问：{dirEx.Message}",
-                UnauthorizedAccessException accessEx => $"没有文件访问权限，请检查输出目录或图片文件权限：{accessEx.Message}",
-                IOException ioEx => $"文件读写失败，请检查磁盘空间、输出目录或图片文件是否可用：{ioEx.Message}",
-                InvalidOperationException opEx => opEx.Message,
-                _ => $"未知错误：{ex.Message}",
-            };
-            await manager.AddMessageToConversationAsync(
-                conversationId,
-                ChatMessage.SystemMessage(errorMsg));
+                await manager.AddMessageToConversationAsync(
+                    conversationId,
+                    ChatMessage.SystemMessage(errorMsg));
+            }
+            catch (Exception persistEx)
+            {
+                // Reporting the failure must never take the app down with it (async void caller).
+                System.Diagnostics.Debug.WriteLine($"[MainForm] failed to persist error message: {persistEx}");
+            }
 
             if (IsActiveConversation(conversationId))
                 CompletePendingResponseWithError(conversationId, errorMsg);
@@ -806,11 +837,37 @@ internal partial class MainForm : Form
         var activeConversationId = _conversationManager?.ActiveConversationId;
         var activeConversationGenerating = activeConversationId != null
             && IsConversationGenerating(activeConversationId);
+        var cancelRequested = activeConversationGenerating
+            && _pendingResponses.TryGetValue(activeConversationId!, out var pending)
+            && pending.CancelledByUser;
 
         _isGenerating = _pendingResponses.Count > 0;
         _sendBtn.Enabled = !activeConversationGenerating;
         _attachBtn.Enabled = !activeConversationGenerating;
         _modelSelector.Enabled = !activeConversationGenerating;
+        _cancelBtn.Visible = activeConversationGenerating;
+        _cancelBtn.Enabled = activeConversationGenerating && !cancelRequested;
+    }
+
+    /// <summary>
+    /// Stops the generation of the active conversation. The in-flight request observes the same
+    /// CancellationTokenSource the timeout uses, so cancelling is immediate; the pending bubble is
+    /// replaced by a "cancelled" notice once the request has unwound.
+    /// </summary>
+    private void CancelBtn_Click(object? sender, EventArgs e)
+    {
+        var activeConversationId = _conversationManager?.ActiveConversationId;
+        if (activeConversationId == null
+            || !_pendingResponses.TryGetValue(activeConversationId, out var pendingState)
+            || pendingState.CancelledByUser)
+        {
+            return;
+        }
+
+        pendingState.CancelledByUser = true;
+        pendingState.Cancellation?.Cancel();
+        UpdatePendingResponseBubble(activeConversationId, T("CancellingGeneration"));
+        RefreshActiveConversationControls();
     }
 
     private void AddChatBubble(ChatMessage msg)

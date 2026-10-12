@@ -174,6 +174,7 @@ internal partial class SettingsForm
         lblConcurrencyHint.Text = T("ConcurrencyHint");
         _themeLabel.Text = T("Theme");
         _languageLabel.Text = T("Language");
+        UpdateCheckboxCaptions();
 
         _versionCaptionLabel.Text = T("CurrentVersion");
         _updateCaptionLabel.Text = T("UpdateCaption");
@@ -286,9 +287,16 @@ internal partial class SettingsForm
                 tabPage.BackColor = palette.Surface;
                 tabPage.ForeColor = palette.Text;
                 break;
-            case TextBox or ComboBox or NumericUpDown:
+            case TextBox or NumericUpDown:
                 control.BackColor = palette.InputBack;
                 control.ForeColor = palette.Text;
+                break;
+            case ComboBox comboBox:
+                // The standard combo style is painted by the OS and ignores both colors, which left
+                // light boxes in the dark theme. Flat style is drawn by WinForms, so the palette wins.
+                comboBox.FlatStyle = FlatStyle.Flat;
+                comboBox.BackColor = palette.InputBack;
+                comboBox.ForeColor = palette.Text;
                 break;
             case Button:
                 break;

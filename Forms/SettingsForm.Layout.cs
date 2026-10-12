@@ -122,6 +122,9 @@ internal partial class SettingsForm
             SetColumnWidth(_appearanceTable, 0, english ? compact ? 118 : 132 : compact ? 98 : 120);
             SetColumnWidth(_aboutTable, 0, english ? compact ? 128 : 150 : compact ? 98 : 120);
             SetColumnWidth(sizeTable, 0, english ? compact ? 118 : 132 : compact ? 92 : 110);
+            // Label column: just wide enough for the longest label of the current language, so the
+            // value controls sit next to their labels instead of a column away.
+            SetColumnWidth(sizeTable, 1, english ? compact ? 96 : 110 : compact ? 78 : 92);
             SetColumnWidth(sizeTable, 2, english ? compact ? 110 : 128 : compact ? 88 : 110);
             SetColumnWidth(formatTable, 0, english ? compact ? 132 : 150 : compact ? 98 : 120);
 
@@ -148,11 +151,18 @@ internal partial class SettingsForm
             ApplyTableControlSpacing(formatTable, rowHeight, compact);
 
             buttonPanel.Height = ScaleValue(compact ? 40 : 46);
-            saveBtn.Size = new Size(ScaleValue(compact ? 82 : 96), ScaleValue(compact ? 30 : 34));
-            cancelBtn.Size = saveBtn.Size;
+            var footerFont = UiFont(compact ? 9F : 10F);
+            var footerHeight = ScaleValue(compact ? 30 : 34);
+            saveBtn.Font = footerFont;
+            cancelBtn.Font = footerFont;
+            // Both footer buttons get the same width, measured from the longer caption plus its icon:
+            // a fixed 82/96px cut the English "Cancel" down to its × icon at the minimum size.
+            var footerWidth = Math.Max(
+                MeasureFooterButtonWidth(saveBtn, footerFont, compact),
+                MeasureFooterButtonWidth(cancelBtn, footerFont, compact));
+            saveBtn.Size = new Size(footerWidth, footerHeight);
+            cancelBtn.Size = new Size(footerWidth, footerHeight);
             cancelBtn.Margin = new Padding(0, 0, ScaleValue(compact ? 8 : 12), 0);
-            saveBtn.Font = UiFont(compact ? 9F : 10F);
-            cancelBtn.Font = UiFont(compact ? 9F : 10F);
             browseBtn.Font = UiFont(compact ? 9F : 10F);
             _conversationBrowseBtn.Font = UiFont(compact ? 9F : 10F);
             _fetchModelsBtn.Font = UiFont(compact ? 9F : 10F);
@@ -210,12 +220,14 @@ internal partial class SettingsForm
     private Font UiFont(float size, FontStyle style = FontStyle.Regular)
     {
         var fontSize = Math.Max(7.5F, size * _uiScale);
-        var sizeKey = (int)Math.Round(fontSize * 100F);
+        // Quantize to 0.25pt: the cache is never trimmed, so a continuously changing _uiScale
+        // (every resize) must not mint a new Font per pixel of width.
+        var sizeKey = (int)Math.Round(fontSize * 4F);
         var key = (sizeKey, style);
         if (_fontCache.TryGetValue(key, out var font))
             return font;
 
-        font = new Font("Microsoft YaHei UI", sizeKey / 100F, style);
+        font = new Font("Microsoft YaHei UI", sizeKey / 4F, style);
         _fontCache[key] = font;
         return font;
     }
@@ -223,6 +235,20 @@ internal partial class SettingsForm
     private void DisposeCachedResources()
     {
         _resizeDebounceTimer.Dispose();
+        // Cancel before disposing: a disposed CTS does not stop the request it handed a token to,
+        // and the continuation would then touch already disposed controls.
+        try
+        {
+            _updateCts?.Cancel();
+        }
+        catch (ObjectDisposedException) { }
+
+        try
+        {
+            _fetchModelsCts?.Cancel();
+        }
+        catch (ObjectDisposedException) { }
+
         _updateCts?.Dispose();
         _fetchModelsCts?.Dispose();
 
@@ -262,11 +288,13 @@ internal partial class SettingsForm
                     continue;
                 }
 
-                label.Height = rowHeight;
+                // Labels fill their table column instead of keeping the designer's fixed 104/114 px:
+                // longer texts (English "Verify TLS certificate", "Max concurrent images") used to be
+                // clipped or wrapped while the column next to them had room to spare.
+                label.AutoSize = false;
+                label.Dock = DockStyle.Fill;
                 label.Font = Equals(label.Tag, "context-help")
                     ? UiFont(compact ? 8.5F : 9F, FontStyle.Bold)
-                    : label == lblConcurrencyHint
-                    ? UiFont(8F)
                     : UiFont(compact ? 9F : 10F);
                 continue;
             }
@@ -319,14 +347,39 @@ internal partial class SettingsForm
             _aboutTable.ClientSize.Width - ScaleValue(compact ? 8 : 12));
         _aboutDescriptionLabel.MaximumSize = new Size(descriptionWidth, 0);
 
-        _checkUpdateBtn.Font = UiFont(compact ? 9F : 10F);
-        _checkUpdateBtn.Size = new Size(ScaleValue(compact ? 138 : 158), ScaleValue(compact ? 30 : 32));
+        var updateFont = UiFont(compact ? 9F : 10F);
+        var updateTextWidth = TextRenderer.MeasureText(
+            _checkUpdateBtn.Text,
+            updateFont,
+            Size.Empty,
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width;
+        _checkUpdateBtn.Font = updateFont;
+        // Sized by its own (localized) caption: the fixed width cut "Check for updates" down to
+        // "Check for" at the minimum window size.
+        _checkUpdateBtn.Size = new Size(
+            Math.Max(
+                ScaleValue(compact ? 108 : 126),
+                updateTextWidth + ScaleValue(18 + 8 + (compact ? 20 : 24))),
+            ScaleValue(compact ? 30 : 32));
         _checkUpdateBtn.TextImageRelation = TextImageRelation.ImageBeforeText;
         _checkUpdateBtn.ImageAlign = ContentAlignment.MiddleLeft;
         _checkUpdateBtn.TextAlign = ContentAlignment.MiddleCenter;
         _checkUpdateBtn.Margin = new Padding(0, ScaleValue(compact ? 5 : 7), 0, ScaleValue(compact ? 5 : 7));
         SetScaledButtonImage(_checkUpdateBtn, "update-24.png", 18);
         UpdateButtonRegion(_checkUpdateBtn, ScaleValue(8));
+    }
+
+    private int MeasureFooterButtonWidth(Button button, Font font, bool compact)
+    {
+        var textWidth = TextRenderer.MeasureText(
+            button.Text,
+            font,
+            Size.Empty,
+            TextFormatFlags.SingleLine | TextFormatFlags.NoPadding).Width;
+        var iconWidth = button.Image?.Width ?? 0;
+        return Math.Max(
+            ScaleValue(compact ? 76 : 92),
+            textWidth + iconWidth + ScaleValue(compact ? 26 : 30));
     }
 
     private static decimal Clamp(int value, decimal min, decimal max) =>

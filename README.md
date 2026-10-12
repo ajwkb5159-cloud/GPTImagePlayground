@@ -5,7 +5,8 @@ GPTImagePlayground is a .NET 10 Windows Forms desktop client for AI image genera
 ## Features
 
 ### Image Generation
-- Generate images from text prompts via `/images/generations`.
+- Generate images from text prompts via `/images/generations`. Generated files get a unique name per
+  request, so two conversations finishing in the same second cannot overwrite each other.
 - Attach reference images for guided generation or editing via `/images/edits`.
 - Concurrent multi-image generation with configurable parallelism (`ImageCount` + `MaxConcurrency`).
 - Responses support both `b64_json` and `url` image data.
@@ -28,6 +29,8 @@ GPTImagePlayground is a .NET 10 Windows Forms desktop client for AI image genera
 - **Localization** — simplified Chinese (zh-CN), English (en), and traditional Chinese (zh-TW).
 - Inline preview of generated images.
 - Token usage and request timing display (when returned by the API).
+- Cancel a running generation per conversation, and a compact-mode layout that keeps localized labels
+  and buttons readable down to the minimum window size.
 - Adaptive icon+text toolbar buttons with proper DPI scaling (PerMonitorV2).
 
 ### Security & Networking

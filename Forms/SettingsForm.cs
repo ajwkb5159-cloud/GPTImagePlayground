@@ -91,6 +91,7 @@ internal partial class SettingsForm : Form
         _sizePresetRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
         _sizeCustomRadio.CheckedChanged += (_, _) => UpdateSizeControlStates();
         _transparentBackgroundCheck.CheckedChanged += (_, _) => UpdateTransparentLabel();
+        _verifySslCertificateCheck.CheckedChanged += (_, _) => UpdateCheckboxCaptions();
         _concurrentCheck.CheckedChanged += (_, _) => UpdateConcurrencyControlStates();
         _resizeDebounceTimer.Tick += (_, _) => FlushResponsiveResize();
         Resize += (_, _) => HandleResponsiveResize();
@@ -206,12 +207,23 @@ internal partial class SettingsForm : Form
 
     private void UpdateTransparentLabel()
     {
-        _transparentBackgroundCheck.Text = _transparentBackgroundCheck.Checked ? "true" : "false";
+        UpdateCheckboxCaptions();
+    }
+
+    /// <summary>
+    /// The checkboxes carry no field label of their own (the caption lives in the label column), so
+    /// their text states the current value instead of the raw bool the designer used to show.
+    /// </summary>
+    private void UpdateCheckboxCaptions()
+    {
+        _verifySslCertificateCheck.Text = _verifySslCertificateCheck.Checked ? T("CheckOn") : T("CheckOff");
+        _transparentBackgroundCheck.Text = _transparentBackgroundCheck.Checked ? T("CheckOn") : T("CheckOff");
+        _concurrentCheck.Text = _concurrentCheck.Checked ? T("CheckOn") : T("CheckOff");
     }
 
     private void UpdateConcurrencyControlStates()
     {
-        _concurrentCheck.Text = _concurrentCheck.Checked ? "true" : "false";
+        UpdateCheckboxCaptions();
         _concurrencyNumeric.Enabled = _concurrentCheck.Checked;
         if (_concurrentCheck.Checked)
         {
@@ -301,6 +313,10 @@ internal partial class SettingsForm : Form
             ImageCount = (int)_imageCountNumeric.Value,
             UseConcurrentStrategy = _concurrentCheck.Checked,
             MaxConcurrency = (int)_concurrencyNumeric.Value,
+            // The dialog builds a fresh AppConfig, so every field has to be carried over explicitly:
+            // a missing one silently falls back to the model default (the reuse toggle used to reset
+            // itself to true on every save).
+            ReuseLastImage = Result.ReuseLastImage,
             ConversationStoreDir = string.IsNullOrWhiteSpace(_conversationDirBox.Text)
                 ? "conversations"
                 : _conversationDirBox.Text.Trim(),

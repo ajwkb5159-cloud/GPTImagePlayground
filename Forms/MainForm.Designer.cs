@@ -31,6 +31,7 @@ partial class MainForm
     private Panel actionBar;
     private Button _attachBtn;
     private Button _sendBtn;
+    private Button _cancelBtn;
     private TextBox _promptBox;
 
     private static Image LoadIconImage(string fileName)
@@ -82,6 +83,7 @@ partial class MainForm
         this.actionBar = new Panel();
         this._attachBtn = new Button();
         this._sendBtn = new Button();
+        this._cancelBtn = new Button();
         this._promptBox = new TextBox();
 
         // ═══════════════════════════════════════════════════
@@ -255,6 +257,18 @@ partial class MainForm
         this._sendBtn.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
         this._sendBtn.FlatAppearance.BorderSize = 0;
 
+        //  _cancelBtn — only visible while the active conversation is generating; sits left of _sendBtn.
+        this._cancelBtn.FlatStyle = FlatStyle.Flat;
+        this._cancelBtn.Text = " 取消生成";
+        this._cancelBtn.Size = new Size(104, 34);
+        this._cancelBtn.Dock = DockStyle.Right;
+        this._cancelBtn.BackColor = Color.FromArgb(241, 245, 249);
+        this._cancelBtn.ForeColor = Color.FromArgb(71, 85, 105);
+        this._cancelBtn.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+        this._cancelBtn.FlatAppearance.BorderSize = 0;
+        this._cancelBtn.Visible = false;
+        this._cancelBtn.TabStop = false;
+
         //  _promptBox
         this._promptBox.Multiline = true;
         this._promptBox.Dock = DockStyle.Fill;
@@ -269,7 +283,10 @@ partial class MainForm
         this._promptBox.ImeMode = ImeMode.NoControl;
 
         // ── input card layout: thumbnails → prompt → actions ──
+        // A lower child index docks *last*, so the cancel button (added first) lands inside the
+        // right-docked send button instead of pushing it around.
         this.promptHost.Controls.Add(this._promptBox);
+        this.actionBar.Controls.Add(this._cancelBtn);
         this.actionBar.Controls.Add(this._sendBtn);
         this.actionBar.Controls.Add(this._attachBtn);
         this.inputCard.Controls.Add(this.promptHost);

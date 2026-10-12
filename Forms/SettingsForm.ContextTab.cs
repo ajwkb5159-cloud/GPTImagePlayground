@@ -546,6 +546,10 @@ internal partial class SettingsForm
                 _verifySslCertificateCheck.Checked,
                 (int)_timeoutNumeric.Value,
                 _fetchModelsCts.Token);
+            // The dialog may have been closed while the request was in flight; touching the
+            // disposed controls below would throw out of this async void handler.
+            if (IsDisposed)
+                return;
 
             foreach (var model in models)
             {

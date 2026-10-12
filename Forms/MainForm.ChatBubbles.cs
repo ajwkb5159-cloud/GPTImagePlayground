@@ -130,10 +130,11 @@ internal partial class MainForm
 
     private Panel CreateBubbleRow(Panel bubble, ChatRole role, int rowWidth)
     {
+        var availableWidth = GetBubbleAvailableWidth(bubble, role, rowWidth);
         var row = new Panel
         {
             Width = rowWidth,
-            Height = Math.Max(ScaleValue(36), bubble.GetPreferredSize(new Size(bubble.MaximumSize.Width, 0)).Height + ScaleValue(8)),
+            Height = Math.Max(ScaleValue(36), bubble.GetPreferredSize(new Size(availableWidth, 0)).Height + ScaleValue(8)),
             Margin = new Padding(0, 4, 0, 4),
             BackColor = Color.Transparent,
             Tag = "chat-row",
@@ -159,13 +160,12 @@ internal partial class MainForm
     {
         var rowWidth = Math.Max(ScaleValue(180), row.ClientSize.Width);
         var isLeftSystemBubble = role == ChatRole.System && bubble is Panel { Tag: "system-bubble" };
-        var availableWidth = role switch
-        {
-            ChatRole.User or ChatRole.Assistant => GetBubbleMaxWidth(rowWidth),
-            ChatRole.System => isLeftSystemBubble ? GetBubbleMaxWidth(rowWidth) : GetSystemBubbleMaxWidth(rowWidth),
-            _ => rowWidth,
-        };
-        bubble.MaximumSize = new Size(availableWidth, 0);
+        var availableWidth = GetBubbleAvailableWidth(bubble, role, rowWidth);
+
+        // Only the width is capped. Writing 0 for the height component would clamp the control to
+        // zero height instead of meaning "unlimited" (measured on .NET 10): every non-AutoSize
+        // bubble panel would collapse, which is exactly how the welcome card used to disappear.
+        bubble.MaximumSize = new Size(availableWidth, int.MaxValue);
 
         if (bubble is Panel { Tag: "system-bubble" } systemBubble)
             LayoutSystemBubble(systemBubble, availableWidth);
@@ -192,6 +192,18 @@ internal partial class MainForm
             ChatRole.User => Math.Max(0, row.ClientSize.Width - bubble.Width),
             ChatRole.System when !isLeftSystemBubble => Math.Max(0, (row.ClientSize.Width - bubble.Width) / 2),
             _ => 0,
+        };
+    }
+
+    /// <summary>Width the bubble may occupy inside its row, per role (left-aligned system bubbles differ).</summary>
+    private int GetBubbleAvailableWidth(Control bubble, ChatRole role, int rowWidth)
+    {
+        var isLeftSystemBubble = role == ChatRole.System && bubble is Panel { Tag: "system-bubble" };
+        return role switch
+        {
+            ChatRole.User or ChatRole.Assistant => GetBubbleMaxWidth(rowWidth),
+            ChatRole.System => isLeftSystemBubble ? GetBubbleMaxWidth(rowWidth) : GetSystemBubbleMaxWidth(rowWidth),
+            _ => rowWidth,
         };
     }
 
@@ -388,8 +400,17 @@ internal partial class MainForm
         copyItem.Enabled = hasPrompt;
         copyItem.Click += (_, _) =>
         {
-            if (hasPrompt)
+            if (!hasPrompt)
+                return;
+
+            try
+            {
                 Clipboard.SetText(prompt);
+            }
+            catch (Exception)
+            {
+                // Another process can hold the clipboard open; a failed copy must not kill the app.
+            }
         };
 
         var refillItem = menu.Items.Add("填回输入框");

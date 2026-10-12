@@ -138,6 +138,8 @@ internal partial class SettingsForm
         {
             var service = new UpdateService(_verifySslCertificateCheck.Checked);
             var result = await service.CheckForUpdateAsync(token);
+            if (IsDisposed)
+                return;
 
             if (!result.IsUpdateAvailable)
             {
@@ -201,6 +203,11 @@ internal partial class SettingsForm
 
         _updateStatusLabel.Text = T("Downloading");
         var zipPath = await service.DownloadPackageAsync(downloadUrl, progress, token);
+
+        // The dialog can be closed while the download runs; installing (and the message box that
+        // follows) needs a live window.
+        if (IsDisposed)
+            return;
 
         _updateStatusLabel.Text = T("InstallingUpdate");
         var logPath = service.LaunchUpdaterAndPrepareExit(zipPath);

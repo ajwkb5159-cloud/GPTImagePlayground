@@ -1,4 +1,4 @@
-#nullable disable
+﻿#nullable disable
 
 namespace ImageGenerator.Forms;
 
@@ -299,7 +299,7 @@ partial class SettingsForm
         _verifySslCertificateCheck.Name = "_verifySslCertificateCheck";
         _verifySslCertificateCheck.Size = new Size(53, 21);
         _verifySslCertificateCheck.TabIndex = 8;
-        _verifySslCertificateCheck.Text = "true";
+        _verifySslCertificateCheck.Text = "";   // filled by UpdateCheckboxCaptions()
         _verifySslCertificateCheck.UseVisualStyleBackColor = true;
 
         sizeTab.Controls.Add(_sizeScrollPanel);
@@ -320,9 +320,9 @@ partial class SettingsForm
         sizeTable.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         sizeTable.ColumnCount = 4;
         sizeTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
-        sizeTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        sizeTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92F));
         sizeTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
-        sizeTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        sizeTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         sizeTable.Controls.Add(_sizeAutoRadio, 0, 0);
         sizeTable.Controls.Add(_sizePresetRadio, 0, 1);
         sizeTable.Controls.Add(lblSizeTier, 1, 1);
@@ -515,7 +515,7 @@ partial class SettingsForm
         _transparentBackgroundCheck.Name = "_transparentBackgroundCheck";
         _transparentBackgroundCheck.Size = new Size(53, 21);
         _transparentBackgroundCheck.TabIndex = 1;
-        _transparentBackgroundCheck.Text = "true";
+        _transparentBackgroundCheck.Text = "";   // filled by UpdateCheckboxCaptions()
         _transparentBackgroundCheck.UseVisualStyleBackColor = true;
 
         lblModeration.Location = new Point(3, 88);
@@ -562,7 +562,7 @@ partial class SettingsForm
         _concurrentCheck.Name = "_concurrentCheck";
         _concurrentCheck.Size = new Size(53, 21);
         _concurrentCheck.TabIndex = 4;
-        _concurrentCheck.Text = "true";
+        _concurrentCheck.Text = "";   // filled by UpdateCheckboxCaptions()
         _concurrentCheck.UseVisualStyleBackColor = true;
 
         lblConcurrency.Location = new Point(3, 220);
@@ -638,7 +638,7 @@ partial class SettingsForm
         Font = new Font("Microsoft YaHei UI", 10F);
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = false;
-        MinimumSize = new Size(460, 420);
+        MinimumSize = new Size(460, 500);
         MinimizeBox = false;
         Name = "SettingsForm";
         Padding = new Padding(20);

@@ -49,7 +49,9 @@ internal class ImageApiService
 
         var sw = Stopwatch.StartNew();
 
-        progress?.Report("正在请求 API...");
+        // No "正在请求 API..." report here on purpose: the pending bubble is registered with the
+        // budget/context status right before the call, and reporting the same sentence again would
+        // overwrite it before the user could read it.
 
         HttpResponseMessage response;
         string? requestDebugInfo = null;
@@ -148,6 +150,9 @@ internal class ImageApiService
 
         if (succeeded.Count == 0)
         {
+            // A cancelled or timed-out run must surface as a cancellation instead of "every
+            // sub-request failed": the caller maps cancellation to the timeout/cancel hint.
+            cancellationToken.ThrowIfCancellationRequested();
             throw new InvalidOperationException(
                 "所有子请求均失败，未生成可保存的图片。" +
                 Environment.NewLine +

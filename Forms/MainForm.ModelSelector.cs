@@ -37,6 +37,9 @@ internal partial class MainForm
         {
             Dock = DockStyle.Top,
             DropDownStyle = ComboBoxStyle.DropDownList,
+            // FlatStyle.Flat is what makes BackColor/ForeColor stick: the standard style is painted
+            // by the OS and would stay light inside the dark theme.
+            FlatStyle = FlatStyle.Flat,
             IntegralHeight = false,
             DisplayMember = nameof(ModelContextProfile.Model),
         };
