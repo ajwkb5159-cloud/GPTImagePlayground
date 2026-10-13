@@ -192,7 +192,7 @@ internal partial class MainForm
             sharePercent);
 
         if (ImageProtocolResolver.UsesGeminiContext(_config.Model))
-            text += T("GeminiMode");
+            text += _config.ReuseLastImage ? T("GeminiMode") : T("GeminiModeNoReuse");
 
         text += Environment.NewLine;
 
@@ -230,10 +230,24 @@ internal partial class MainForm
                     UsageSummary.FormatOptional(latestUsage.CacheCreationInputTokens),
                     UsageSummary.FormatCount(latestUsage.OutputTokens)));
 
+        RefreshReuseToggleTooltip();
+
         // The monitor text changes with every request, so the row height follows it right away.
         UpdateMonitorStripHeight(_monitorMaxLines);
         UpdateInputPanelHeight();
     }
+
+    /// <summary>
+    /// The reuse switch means different wire behavior per protocol, so the tooltip follows the
+    /// selected model: OpenAI-compatible models use the newest image as the edit base, Gemini models
+    /// carry history images inside "contents".
+    /// </summary>
+    private void RefreshReuseToggleTooltip() =>
+        _modelSelectorToolTip?.SetToolTip(
+            _reuseImageCheck,
+            ImageProtocolResolver.UsesGeminiContext(_config.Model)
+                ? T("ReuseLastImageHelpGemini")
+                : T("ReuseLastImageHelp"));
 
     /// <summary>
     /// Grows the monitor row to the height its wrapped text needs, so the whole line stays visible
@@ -294,7 +308,7 @@ internal partial class MainForm
         _reuseImageCheck.Visible = !tight;
         _monitorMaxLines = tight ? 2 : 3;
         _modelSelectorToolTip?.SetToolTip(_modelSelector, T("SwitchModel"));
-        _modelSelectorToolTip?.SetToolTip(_reuseImageCheck, T("ReuseLastImageHelp"));
+        RefreshReuseToggleTooltip();
     }
 
     private void DisposeModelSelector()

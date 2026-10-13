@@ -23,6 +23,10 @@ GPTImagePlayground is a .NET 10 Windows Forms desktop client for AI image genera
 - **Context-aware prompt enhancement** — local heuristic analysis decides whether to inject recent conversation text or auto-attach recent generated images.
 - **Context compression** — older messages are summarized when the conversation exceeds configured limits, keeping the active window manageable.
 - Manual attachments take priority over auto-attached history images (configurable).
+- The **reuse last image** toggle governs both generation channels: OpenAI-compatible models send the
+  newest generated image as the edit base, and Gemini native multi-turn models carry history images
+  inside `contents`. Unchecking it drops every history image (history text is still kept), which also
+  keeps image tokens out of the request.
 
 ### UI & Experience
 - **Themes** — light and dark mode.

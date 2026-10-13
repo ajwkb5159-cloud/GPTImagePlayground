@@ -681,7 +681,8 @@ internal partial class MainForm : Form
         ContextDecision? contextDecision = null;
         ContextBudgetPlan? contextBudget = null;
         // Gemini image models receive the whole conversation through "contents", so the local
-        // context prefix (which exists to fake that) is skipped for them entirely.
+        // context prefix (which exists to fake that) is skipped for them entirely. Whether the
+        // history *images* travel is still decided by the reuse toggle (GeminiImageService reads it).
         var geminiContext = ImageProtocolResolver.UsesGeminiContext(_config.Model);
 
         try

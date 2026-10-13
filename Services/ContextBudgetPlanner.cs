@@ -52,6 +52,10 @@ internal sealed class ContextBudgetPlanner
         var inputBudget = Math.Max(MinimumInputBudget, maxContextTokens - maxOutputTokens);
 
         var imageTokensPerImage = ResolveImageTokensPerImage(conversation);
+        // History images travel only while "reuse last image" is on (both channels obey that switch),
+        // so with it off they must not reserve budget either — otherwise text history would be trimmed
+        // for space the request will never use.
+        var historyImageTokensPerImage = appConfig.ReuseLastImage ? imageTokensPerImage : 0;
         var currentPromptTokens = TokenEstimator.EstimateText(prompt)
             + TokenEstimator.EstimateImageTokens(manuallyAttachedImagePaths.Count, imageTokensPerImage);
         var promptExceedsBudget = currentPromptTokens >= inputBudget;
@@ -74,7 +78,7 @@ internal sealed class ContextBudgetPlanner
         for (var i = conversation.Messages.Count - 1; i >= 0; i--)
         {
             var message = conversation.Messages[i];
-            var cost = TokenEstimator.EstimateMessageContextTokens(message, imageTokensPerImage);
+            var cost = TokenEstimator.EstimateMessageContextTokens(message, historyImageTokensPerImage);
             if (cost > remaining)
                 break;
 

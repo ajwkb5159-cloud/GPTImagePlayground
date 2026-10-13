@@ -54,8 +54,9 @@ internal static class TokenEstimator
         return (int)Math.Ceiling(cjkCount + latinTokens);
     }
 
+    /// <summary>A per-image cost of zero means the images are not sent at all, so they cost nothing.</summary>
     public static int EstimateImageTokens(int imageCount, int imageTokensPerImage) =>
-        imageCount <= 0 ? 0 : imageCount * Math.Max(1, imageTokensPerImage);
+        imageCount <= 0 || imageTokensPerImage <= 0 ? 0 : imageCount * imageTokensPerImage;
 
     /// <summary>
     /// Approximate cost this message contributes to the next request. Only what the app actually

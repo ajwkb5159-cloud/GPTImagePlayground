@@ -13,6 +13,9 @@ namespace ImageGenerator.Services;
 /// Why a separate service: that endpoint takes a <c>contents</c> array, so the whole conversation —
 /// every earlier user request *and* every image produced back then — is real context for the model.
 /// The OpenAI image endpoints only take a single prompt and reject Gemini image models outright.
+///
+/// Whether the history <em>images</em> travel is governed by the same "reuse last image" switch the
+/// OpenAI channel obeys: with it off the history keeps its text turns and nothing else.
 /// </summary>
 internal sealed class GeminiImageService
 {
@@ -74,9 +77,16 @@ internal sealed class GeminiImageService
         var trimmedNote = plan is { TrimmedMessageCount: > 0 }
             ? $"，较早历史已按预算裁剪 {plan.TrimmedMessageCount} 条"
             : "";
+        var historyNote = _config.ReuseLastImage
+            ? history.SkippedImageCount > 0
+                ? $"，{history.SkippedImageCount} 张历史图片不可用已跳过"
+                : ""
+            : "";
+        var historySummary = _config.ReuseLastImage
+            ? $"携带 {history.UserTurnCount} 轮历史、{history.ImageCount} 张历史图{historyNote}"
+            : $"已关闭「续接上一张图」，只携带 {history.UserTurnCount} 轮历史文本";
         progress?.Report(
-            $"Gemini 原生多轮上下文：携带 {history.UserTurnCount} 轮历史、{history.ImageCount} 张历史图{trimmedNote}，"
-            + $"比例 {aspectRatio}，正在请求 API...");
+            $"Gemini 原生多轮上下文：{historySummary}{trimmedNote}，比例 {aspectRatio}，正在请求 API...");
 
         using var httpClient = ApiHttpClientFactory.Create(
             _config.ApiKey,
@@ -164,23 +174,32 @@ internal sealed class GeminiImageService
     //  Conversation → contents
     // ═══════════════════════════════════════════════════
 
-    private sealed record HistoryPayload(List<GeminiContent> Turns, int UserTurnCount, int ImageCount);
+    private sealed record HistoryPayload(
+        List<GeminiContent> Turns,
+        int UserTurnCount,
+        int ImageCount,
+        int SkippedImageCount);
 
     /// <summary>
     /// Turns earlier messages into Gemini turns: each user request becomes a "user" turn with the
     /// reference images it carried, and each generated image becomes a "model" turn. This is what the
     /// model actually "remembers" — nothing is compressed or paraphrased.
+    ///
+    /// History images only travel while "reuse last image" is on (the OpenAI channel reads that same
+    /// switch); with it off the history shrinks to its text turns, which also saves image tokens.
     /// </summary>
     private HistoryPayload BuildHistory(Conversation? conversation)
     {
         var turns = new List<GeminiContent>();
         if (conversation == null || conversation.Messages.Count == 0)
-            return new HistoryPayload(turns, 0, 0);
+            return new HistoryPayload(turns, 0, 0, 0);
 
+        var reuseLastImage = _config.ReuseLastImage;
         var turnBudget = Math.Max(0, Math.Min(MaxHistoryTurns, conversation.ContextConfig.MaxContextPrompts));
         var imageBudget = MaxHistoryImages;
         var userTurns = 0;
         var images = 0;
+        var skippedImages = 0;
 
         // The last message is the current request (added by MainForm right before generating), so
         // history starts one entry earlier.
@@ -193,14 +212,22 @@ internal sealed class GeminiImageService
             var message = conversation.Messages[i];
             if (message.Role == ChatRole.Assistant)
             {
+                if (!reuseLastImage)
+                    continue;
+
                 var path = message.GeneratedImagePath;
-                if (images < imageBudget
-                    && !string.IsNullOrWhiteSpace(path)
-                    && File.Exists(path)
-                    && TryReadImagePart(path, out var part))
+                if (string.IsNullOrWhiteSpace(path))
+                    continue;
+
+                if (images < imageBudget && File.Exists(path) && TryReadImagePart(path, out var part))
                 {
                     turns.Add(GeminiContent.Model(part!));
                     images++;
+                }
+                else if (images < imageBudget)
+                {
+                    // The conversation expects an image here but the file is gone, oversized or unreadable.
+                    skippedImages++;
                 }
 
                 continue;
@@ -216,15 +243,22 @@ internal sealed class GeminiImageService
             if (!string.IsNullOrWhiteSpace(message.Prompt))
                 parts.Add(GeminiPart.FromText(message.Prompt.Trim()));
 
-            foreach (var attachment in message.AttachedImagePaths)
+            if (reuseLastImage)
             {
-                if (images >= imageBudget)
-                    break;
-
-                if (File.Exists(attachment) && TryReadImagePart(attachment, out var part))
+                foreach (var attachment in message.AttachedImagePaths)
                 {
-                    parts.Add(part!);
-                    images++;
+                    if (images >= imageBudget)
+                        break;
+
+                    if (File.Exists(attachment) && TryReadImagePart(attachment, out var part))
+                    {
+                        parts.Add(part!);
+                        images++;
+                    }
+                    else
+                    {
+                        skippedImages++;
+                    }
                 }
             }
 
@@ -236,7 +270,7 @@ internal sealed class GeminiImageService
         }
 
         turns.Reverse();
-        return new HistoryPayload(turns, userTurns, images);
+        return new HistoryPayload(turns, userTurns, images, skippedImages);
     }
 
     private async Task<GeminiContent> BuildCurrentTurnAsync(
